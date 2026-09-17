@@ -31,12 +31,12 @@ transport.
 
 ## Installation
 
-Rexd is not yet published on Hex. Add it from Git:
+Add `rexd` to the dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:rexd, github: "thatsme/rexd", tag: "v1.0.0"}
+    {:rexd, "~> 1.0"}
   ]
 end
 ```
