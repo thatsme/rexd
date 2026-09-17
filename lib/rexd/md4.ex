@@ -46,26 +46,66 @@ defmodule Rexd.MD4 do
     for <<block::binary-size(64) <- last>>, reduce: state, do: (state -> compress(state, block))
   end
 
-  defp compress({a, b, c, d} = state, block) do
-    words = List.to_tuple(for <<word::little-32 <- block>>, do: word)
-    {a2, b2, c2, d2} = Enum.reduce(@steps, state, &step(&1, &2, words))
-    {a + a2 &&& @mask, b + b2 &&& @mask, c + c2 &&& @mask, d + d2 &&& @mask}
+  # ---------------------------------------------------------------------------
+  # compress/2 is generated at compile time from @steps: each of the 48 steps
+  # becomes a rebinding of one state variable, with the message words bound
+  # once from the block. The direct form (a tuple per step, folded with
+  # Enum.reduce) allocates on every step, which made its speed depend on the
+  # caller's heap state by 2-3x; see NOTES.md, "Code shaped by performance".
+  # ---------------------------------------------------------------------------
+
+  var = fn name -> Macro.var(name, __MODULE__) end
+  words = for i <- 0..15, do: var.(:"x#{i}")
+  [a, b, c, d] = for name <- [:a, :b, :c, :d], do: var.(name)
+  mask = @mask
+
+  # Step j updates a, d, c, b in turn; the other three are its operands in
+  # the order RFC 1320 lists them.
+  roles = [{a, b, c, d}, {d, a, b, c}, {c, d, a, b}, {b, c, d, a}]
+
+  mix = fn
+    1, x, y, z ->
+      quote(do: (unquote(x) &&& unquote(y)) ||| (bnot(unquote(x)) &&& unquote(z)))
+
+    2, x, y, z ->
+      quote(
+        do:
+          (unquote(x) &&& unquote(y)) ||| (unquote(x) &&& unquote(z)) |||
+            (unquote(y) &&& unquote(z))
+      )
+
+    3, x, y, z ->
+      quote(do: bxor(unquote(x), bxor(unquote(y), unquote(z))))
   end
 
-  # Each step updates the first word of the state and rotates the roles, so
-  # the next step sees {d, a', b, c}.
-  defp step({round, k, shift}, {a, b, c, d}, words) do
-    sum = a + mix(round, b, c, d) + elem(words, k) + constant(round) &&& @mask
-    {d, rotl(sum, shift), b, c}
+  constant = %{1 => 0, 2 => 0x5A827999, 3 => 0x6ED9EBA1}
+
+  steps =
+    for {{round, k, shift}, j} <- Enum.with_index(@steps) do
+      {target, x, y, z} = Enum.at(roles, rem(j, 4))
+
+      quote do
+        t =
+          unquote(target) + unquote(mix.(round, x, y, z)) + unquote(Enum.at(words, k)) +
+            unquote(constant[round]) &&& unquote(mask)
+
+        unquote(target) = (t <<< unquote(shift) ||| t >>> unquote(32 - shift)) &&& unquote(mask)
+      end
+    end
+
+  block_pattern = for w <- words, do: quote(do: unquote(w) :: little - 32)
+  initial = for v <- [a, b, c, d], do: var.(:"#{elem(v, 0)}0")
+
+  defp compress({unquote_splicing(initial)}, <<unquote_splicing(block_pattern)>>) do
+    unquote_splicing(
+      for {v, v0} <- Enum.zip([a, b, c, d], initial), do: quote(do: unquote(v) = unquote(v0))
+    )
+
+    unquote_splicing(steps)
+
+    {unquote_splicing(
+       for {v, v0} <- Enum.zip([a, b, c, d], initial),
+           do: quote(do: unquote(v0) + unquote(v) &&& unquote(mask))
+     )}
   end
-
-  defp mix(1, b, c, d), do: (b &&& c) ||| (bnot(b) &&& d)
-  defp mix(2, b, c, d), do: (b &&& c) ||| (b &&& d) ||| (c &&& d)
-  defp mix(3, b, c, d), do: bxor(b, bxor(c, d))
-
-  defp constant(1), do: 0
-  defp constant(2), do: 0x5A827999
-  defp constant(3), do: 0x6ED9EBA1
-
-  defp rotl(x, n), do: (x <<< n ||| x >>> (32 - n)) &&& @mask
 end

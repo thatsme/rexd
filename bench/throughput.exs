@@ -3,15 +3,19 @@
 #     mix run bench/throughput.exs [megabytes]
 #
 # Every figure is input megabytes (MiB) per second of wall-clock time on one
-# scheduler, measured with :timer.tc, the best of five runs. On machines with
-# performance and efficiency cores single runs vary by more than 2x depending
-# on where the scheduler thread lands. Results are printed as a Markdown table.
+# scheduler, measured with :timer.tc. On machines with performance and
+# efficiency cores, speed varies by more than 2x depending on which kind of
+# core runs the scheduler thread, and that placement persists for seconds at a
+# time, so back-to-back repetitions do not average it out. The whole table is
+# therefore measured in several interleaved rounds and each row reports its
+# best run. Results are printed as a Markdown table.
 
 defmodule Bench.Throughput do
   alias Rexd.{Blake2b, RabinKarp, Signature}
 
   @block_len 2048
   @chunk 65_536
+  @rounds 4
 
   def run(mb) do
     size = mb * 1024 * 1024
@@ -50,20 +54,20 @@ defmodule Bench.Throughput do
        fn -> Rexd.patch(basis, edited_delta) end}
     ]
 
+    best =
+      Enum.reduce(1..@rounds, %{}, fn _round, best ->
+        Enum.reduce(rows, best, fn {name, _bytes, fun}, best ->
+          :erlang.garbage_collect()
+          {micros, _} = :timer.tc(fun)
+          Map.update(best, name, micros, &min(&1, micros))
+        end)
+      end)
+
     IO.puts("| Operation | MiB/s |")
     IO.puts("|-----------|------:|")
 
-    for {name, bytes, fun} <- rows do
-      micros =
-        Enum.min(
-          for _run <- 1..5 do
-            :erlang.garbage_collect()
-            {micros, _} = :timer.tc(fun)
-            micros
-          end
-        )
-
-      IO.puts("| #{name} | #{Float.round(bytes / 1_048_576 / (micros / 1.0e6), 1)} |")
+    for {name, bytes, _fun} <- rows do
+      IO.puts("| #{name} | #{Float.round(bytes / 1_048_576 / (best[name] / 1.0e6), 1)} |")
     end
   end
 

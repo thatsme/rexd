@@ -58,9 +58,10 @@ four are read and written.
   in-memory hash table; it never reaches the wire.
 - **MD4** keeps at most 16 bytes per block. OTP's `:crypto` provides MD4 only
   when OpenSSL's legacy provider is loaded, which many OpenSSL 3 builds omit,
-  so Rexd implements RFC 1320 in Elixir (`lib/rexd/md4.ex`). It runs at about the speed of
-  `Rexd.Blake2b` in its direct form, so it needs none of BLAKE2b's
-  restructuring.
+  so Rexd implements RFC 1320 in Elixir (`lib/rexd/md4.ex`). Its 32-bit
+  words fit the small-integer range, so unlike BLAKE2b it needs no split
+  words; its rounds are nevertheless generated at compile time, for the
+  reason given under "Code shaped by performance".
 
 ## Block length
 
@@ -221,6 +222,7 @@ random data, `block_len` 2048, `strong_sum_len` 32.
 | `scan/4` in `lib/rexd/delta/search.ex` | classify every window, then record the result | misses handled inline | 32.6 → 35.7 MB/s on unmatched data |
 | `advance/4` in `lib/rexd/delta/search.ex` | `ctx.field` for each value | one destructuring match | 26.5 → 32.6 MB/s on unmatched data |
 | `advance/4` in `lib/rexd/delta/search.ex` | `weak_hash.rotate(...)` through the module in the context | one clause per checksum with a static call | 24.7 → 29.1 MB/s on unmatched data |
+| `compress/2` in `lib/rexd/md4.ex` | 48 steps folded over a state tuple | steps unrolled at compile time into variable bindings | 51 → 141 MiB/s for signatures in a fresh process |
 | `rotate/5` in `lib/rexd/rabin_karp.ex` | constants recomputed per step | `MULT^n` and `MULT^n·ADJ` passed in | avoids bignum products on every byte |
 
 The reverse trade was also made once. The delta search was first written as
@@ -228,6 +230,13 @@ a single loop with nine positional arguments, which ran at 43.7 MB/s on
 unmatched data. It was restructured around the `Context` and `Output`
 structs for clarity at a cost of about 18%, since the result stays well above
 the 20 MB/s design target.
+
+MD4 was first written directly: the 48 steps folded over a tuple of state
+words with `Enum.reduce/3`. That form allocates on every step, and its speed
+depended on the calling process's heap: rollsum + MD4 signatures of 20 MiB
+ran at 51 MiB/s in a fresh process and 117 MiB/s in one with a grown heap.
+Generating the steps at compile time as plain variable rebindings removes the
+allocation; the same signatures run at 141 MiB/s in both.
 
 One apparent optimisation was rejected: splitting `h·MULT` in RabinKarp into
 16-bit halves to avoid occasional bignums measured 305 MB/s against 473 MB/s
