@@ -97,11 +97,8 @@ defmodule Rexd.Signature do
   @spec magic(t()) :: non_neg_integer()
   def magic(%__MODULE__{weak: weak, strong: strong}), do: Map.fetch!(@magics, {weak, strong})
 
-  @doc """
-  Computes the signature of `basis`. See `Rexd.signature/2` for options.
-
-  Raises `ArgumentError` on invalid options.
-  """
+  @doc false
+  # Rexd.signature/2 delegates here.
   @spec compute(binary(), keyword()) :: t()
   def compute(basis, opts \\ []) when is_binary(basis) and is_list(opts) do
     sig = options!(opts)
@@ -180,13 +177,9 @@ defmodule Rexd.Signature do
   def weak_module(:rabinkarp), do: RabinKarp
   def weak_module(:rollsum), do: Rollsum
 
-  @doc """
-  The strong hash of `data` with algorithm `kind`, truncated to
-  `strong_sum_len` bytes.
-
-      iex> Rexd.Signature.strong(:md4, "abc", 4)
-      <<0xA4, 0x48, 0x01, 0x7A>>
-  """
+  @doc false
+  # The strong hash of `data` with algorithm `kind`, truncated to
+  # `strong_sum_len` bytes.
   @spec strong(strong(), binary(), pos_integer()) :: binary()
   def strong(kind, data, strong_sum_len) do
     <<sum::binary-size(strong_sum_len), _::binary>> = full_strong(kind, data)

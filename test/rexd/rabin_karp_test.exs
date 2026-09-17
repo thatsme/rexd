@@ -6,8 +6,6 @@ defmodule Rexd.RabinKarpTest do
 
   alias Rexd.RabinKarp
 
-  doctest RabinKarp
-
   describe "hash/1" do
     test "matches the librsync weak sum for a known block" do
       # rdiff signature -b 2048 -S 32 over this 25-byte input yields weak 0xa18f3b3c

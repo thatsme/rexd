@@ -1,25 +1,26 @@
 defmodule Rexd.Patch do
-  @moduledoc """
-  Applies a `Rexd.Delta` to a basis binary.
-
-  The commands are checked before any output is built: every copy must lie
-  inside the basis, and the total output size can be capped with
-  `:max_size`. A delta is usually received from another party, and a few
-  bytes of copy commands can describe an output many times larger than the
-  delta itself, so callers that do not trust the sender should set a limit.
-
-  On success the result is built in a single `IO.iodata_to_binary/1`: copy
-  commands contribute sub-binaries of the basis and literal commands their
-  own bytes.
-  """
+  @moduledoc false
+  # Applies a `Rexd.Delta` to a basis binary.
+  #
+  # The commands are checked before any output is built: every copy must lie
+  # inside the basis, and the total output size can be capped with
+  # `:max_size`. A delta is usually received from another party, and a few
+  # bytes of copy commands can describe an output many times larger than the
+  # delta itself, so callers that do not trust the sender should set a limit.
+  #
+  # On success the result is built in a single `IO.iodata_to_binary/1`: copy
+  # commands contribute sub-binaries of the basis and literal commands their
+  # own bytes.
 
   alias Rexd.Delta
 
+  @typedoc false
   @type error ::
           {:copy_out_of_range, non_neg_integer(), non_neg_integer()}
           | {:output_too_large, non_neg_integer(), non_neg_integer()}
 
-  @doc "Applies `delta` to `basis`. See `Rexd.patch/3` for options and errors."
+  @doc false
+  # Rexd.patch/3 delegates here.
   @spec apply_delta(binary(), Delta.t(), keyword()) :: {:ok, binary()} | {:error, error()}
   def apply_delta(basis, %Delta{commands: commands}, opts \\ []) when is_binary(basis) do
     max_size = options!(opts)

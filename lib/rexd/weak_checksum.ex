@@ -1,12 +1,11 @@
 defmodule Rexd.WeakChecksum do
-  @moduledoc """
-  The interface shared by the rolling checksums, `Rexd.RabinKarp` and
-  `Rexd.Rollsum`.
-
-  `window/1` precomputes whatever a checksum needs for windows of a given
-  length; `rotate/5` and `rollout/4` receive those two values back, so the
-  delta search can slide either checksum without knowing which one it holds.
-  """
+  @moduledoc false
+  # The interface shared by the rolling checksums, `Rexd.RabinKarp` and
+  # `Rexd.Rollsum`.
+  #
+  # `window/1` precomputes whatever a checksum needs for windows of a given
+  # length; `rotate/5` and `rollout/4` receive those two values back, so the
+  # delta search can slide either checksum without knowing which one it holds.
 
   @doc "Checksums a binary from scratch."
   @callback hash(binary()) :: non_neg_integer()

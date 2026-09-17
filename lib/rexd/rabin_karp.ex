@@ -1,30 +1,29 @@
 defmodule Rexd.RabinKarp do
-  @moduledoc """
-  The RabinKarp rolling hash used as the weak checksum in librsync 2.x
-  signatures (`RS_RK_BLAKE2_SIG_MAGIC`).
-
-  The hash of a window `b_0 .. b_(n-1)` is the polynomial
-
-      SEED·MULT^n + b_0·MULT^(n-1) + ... + b_(n-1)    (mod 2^32)
-
-  with `SEED = 1` and `MULT = 0x08104225`, matching `rabinkarp.h`. Bytes are
-  hashed as-is, with no per-byte offset.
-
-  Sliding the window drops `out` and appends `in`. Because the seed term moves
-  up one power with every appended byte, removing `out` also subtracts
-  `MULT^n·(MULT − 1)`, which librsync writes as `MULT^n·(out + ADJ)` with
-  `ADJ = MULT − 1`.
-
-  Both `MULT^n` and `MULT^n·ADJ` depend only on the window length, so callers
-  precompute them once with `window/1` and pass them to `rotate/5` and
-  `rollout/4`. The per-byte work is then `h·MULT` (below 2^59.01) and
-  `MULT^n·out` (below 2^40): no bignum is built on the rolling path except
-  for the rare `h·MULT` whose `h` lies within about 1% of 2^32.
-
-  The multiplication `h·MULT` is deliberately left whole. Splitting it into
-  16-bit halves keeps every product small but measured about 35% slower,
-  because the rare bignum costs less than the extra arithmetic on every byte.
-  """
+  @moduledoc false
+  # The RabinKarp rolling hash used as the weak checksum in librsync 2.x
+  # signatures (`RS_RK_BLAKE2_SIG_MAGIC`).
+  #
+  # The hash of a window `b_0 .. b_(n-1)` is the polynomial
+  #
+  #     SEED·MULT^n + b_0·MULT^(n-1) + ... + b_(n-1)    (mod 2^32)
+  #
+  # with `SEED = 1` and `MULT = 0x08104225`, matching `rabinkarp.h`. Bytes are
+  # hashed as-is, with no per-byte offset.
+  #
+  # Sliding the window drops `out` and appends `in`. Because the seed term moves
+  # up one power with every appended byte, removing `out` also subtracts
+  # `MULT^n·(MULT − 1)`, which librsync writes as `MULT^n·(out + ADJ)` with
+  # `ADJ = MULT − 1`.
+  #
+  # Both `MULT^n` and `MULT^n·ADJ` depend only on the window length, so callers
+  # precompute them once with `window/1` and pass them to `rotate/5` and
+  # `rollout/4`. The per-byte work is then `h·MULT` (below 2^59.01) and
+  # `MULT^n·out` (below 2^40): no bignum is built on the rolling path except
+  # for the rare `h·MULT` whose `h` lies within about 1% of 2^32.
+  #
+  # The multiplication `h·MULT` is deliberately left whole. Splitting it into
+  # 16-bit halves keeps every product small but measured about 35% slower,
+  # because the rare bignum costs less than the extra arithmetic on every byte.
 
   import Bitwise
 
@@ -45,12 +44,7 @@ defmodule Rexd.RabinKarp do
   @spec seed() :: t()
   def seed, do: @seed
 
-  @doc """
-  Hashes `data` from scratch.
-
-      iex> Rexd.RabinKarp.hash("")
-      1
-  """
+  @doc "Hashes `data` from scratch."
   @impl true
   @spec hash(binary()) :: t()
   def hash(data) when is_binary(data), do: update(@seed, data)

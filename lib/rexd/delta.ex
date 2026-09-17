@@ -48,14 +48,15 @@ defmodule Rexd.Delta do
   @spec magic() :: non_neg_integer()
   def magic, do: @magic
 
-  @doc "Computes the delta from the basis described by `sig` to `new`. See `Rexd.delta/2`."
+  @doc false
+  # Rexd.delta/3 builds on compute_with_stats/2.
   @spec compute(Signature.t(), binary()) :: t()
   def compute(%Signature{} = sig, new) when is_binary(new) do
     {delta, _stats} = compute_with_stats(sig, new)
     delta
   end
 
-  @doc "Like `compute/2`, also returning statistics. See `Rexd.delta_with_stats/2`."
+  @doc false
   @spec compute_with_stats(Signature.t(), binary()) :: {t(), Stats.t()}
   def compute_with_stats(%Signature{} = sig, new) when is_binary(new) do
     {commands, search} = Search.run(sig, new)

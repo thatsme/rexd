@@ -1,19 +1,18 @@
 defmodule Rexd.Rollsum do
-  @moduledoc """
-  The adler-style rolling checksum of librsync's older signature types
-  (`RS_MD4_SIG_MAGIC`, `RS_BLAKE2_SIG_MAGIC`).
-
-  Two 16-bit sums are kept over a window of `n` bytes, each byte counted with
-  an offset of 31 (`ROLLSUM_CHAR_OFFSET` in `rollsum.h`):
-
-      s1 = Σ (b_i + 31)                     (mod 2^16)
-      s2 = Σ (n − i) · (b_i + 31)           (mod 2^16)
-      digest = s2 · 2^16 + s1
-
-  The functions mirror `Rexd.RabinKarp` so the delta search can use either
-  checksum: `window/1` returns the per-length constants, here the window
-  length itself, and `rotate/5` and `rollout/4` take them.
-  """
+  @moduledoc false
+  # The adler-style rolling checksum of librsync's older signature types
+  # (`RS_MD4_SIG_MAGIC`, `RS_BLAKE2_SIG_MAGIC`).
+  #
+  # Two 16-bit sums are kept over a window of `n` bytes, each byte counted with
+  # an offset of 31 (`ROLLSUM_CHAR_OFFSET` in `rollsum.h`):
+  #
+  #     s1 = Σ (b_i + 31)                     (mod 2^16)
+  #     s2 = Σ (n − i) · (b_i + 31)           (mod 2^16)
+  #     digest = s2 · 2^16 + s1
+  #
+  # The functions mirror `Rexd.RabinKarp` so the delta search can use either
+  # checksum: `window/1` returns the per-length constants, here the window
+  # length itself, and `rotate/5` and `rollout/4` take them.
 
   import Bitwise
 
@@ -22,12 +21,7 @@ defmodule Rexd.Rollsum do
   @mask 0xFFFF
   @char_offset 31
 
-  @doc """
-  Checksums `data` from scratch.
-
-      iex> Rexd.Rollsum.hash("")
-      0
-  """
+  @doc "Checksums `data` from scratch."
   @impl true
   @spec hash(binary()) :: non_neg_integer()
   def hash(data) when is_binary(data), do: sums(data, 0, 0)

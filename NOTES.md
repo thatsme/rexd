@@ -58,7 +58,7 @@ four are read and written.
   in-memory hash table; it never reaches the wire.
 - **MD4** keeps at most 16 bytes per block. OTP's `:crypto` provides MD4 only
   when OpenSSL's legacy provider is loaded, which many OpenSSL 3 builds omit,
-  so `Rexd.MD4` implements RFC 1320 in Elixir. It runs at about the speed of
+  so Rexd implements RFC 1320 in Elixir (`lib/rexd/md4.ex`). It runs at about the speed of
   `Rexd.Blake2b` in its direct form, so it needs none of BLAKE2b's
   restructuring.
 
@@ -221,7 +221,7 @@ random data, `block_len` 2048, `strong_sum_len` 32.
 | `scan/4` in `lib/rexd/delta/search.ex` | classify every window, then record the result | misses handled inline | 32.6 → 35.7 MB/s on unmatched data |
 | `advance/4` in `lib/rexd/delta/search.ex` | `ctx.field` for each value | one destructuring match | 26.5 → 32.6 MB/s on unmatched data |
 | `advance/4` in `lib/rexd/delta/search.ex` | `weak_hash.rotate(...)` through the module in the context | one clause per checksum with a static call | 24.7 → 29.1 MB/s on unmatched data |
-| `Rexd.RabinKarp.rotate/5` | constants recomputed per step | `MULT^n` and `MULT^n·ADJ` passed in | avoids bignum products on every byte |
+| `rotate/5` in `lib/rexd/rabin_karp.ex` | constants recomputed per step | `MULT^n` and `MULT^n·ADJ` passed in | avoids bignum products on every byte |
 
 The reverse trade was also made once. The delta search was first written as
 a single loop with nine positional arguments, which ran at 43.7 MB/s on

@@ -6,9 +6,6 @@ defmodule Rexd.LegacySignatureTest do
   alias Rexd.{Delta, MD4, Rollsum, Signature}
   alias Rexd.Test.Oracle
 
-  doctest Rollsum
-  doctest MD4
-
   @kinds [{:rabinkarp, :blake2}, {:rabinkarp, :md4}, {:rollsum, :blake2}, {:rollsum, :md4}]
 
   defp kinds, do: member_of(@kinds)

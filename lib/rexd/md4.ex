@@ -1,12 +1,11 @@
 defmodule Rexd.MD4 do
-  @moduledoc """
-  MD4 (RFC 1320), the strong hash of librsync's `RS_MD4_SIG_MAGIC` and
-  `RS_RK_MD4_SIG_MAGIC` signatures.
-
-  MD4 is broken as a cryptographic hash and is provided only to read and write
-  those signature types. OTP's `:crypto` offers MD4 only when OpenSSL's legacy
-  provider is available, so it is implemented here.
-  """
+  @moduledoc false
+  # MD4 (RFC 1320), the strong hash of librsync's `RS_MD4_SIG_MAGIC` and
+  # `RS_RK_MD4_SIG_MAGIC` signatures.
+  #
+  # MD4 is broken as a cryptographic hash and is provided only to read and write
+  # those signature types. OTP's `:crypto` offers MD4 only when OpenSSL's legacy
+  # provider is available, so it is implemented here.
 
   import Bitwise
 
@@ -27,12 +26,7 @@ defmodule Rexd.MD4 do
            )
          ])
 
-  @doc """
-  Returns the 16-byte MD4 digest of `data`.
-
-      iex> Rexd.MD4.hash("abc") |> Base.encode16(case: :lower)
-      "a448017aaf21d8525fc10ae87aa6729d"
-  """
+  @doc "Returns the 16-byte MD4 digest of `data`."
   @spec hash(binary()) :: <<_::128>>
   def hash(data) when is_binary(data) do
     {a, b, c, d} = blocks(data, {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476}, byte_size(data))

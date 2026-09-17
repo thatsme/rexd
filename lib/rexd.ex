@@ -30,13 +30,18 @@ defmodule Rexd do
     * `Rexd.Stream` - the same operations over enumerables of binaries, in
       bounded memory.
     * `Rexd.InPlace` - rebuilding the new version inside the basis storage.
-    * `Rexd.RabinKarp`, `Rexd.Rollsum`, `Rexd.Blake2b`, `Rexd.MD4` - the
-      rolling checksums and strong hashes.
+    * `Rexd.Blake2b` - BLAKE2b-256 in Elixir, the default strong hash, usable
+      on its own.
   """
 
   import Bitwise
 
   alias Rexd.{Delta, InPlace, Patch, Signature}
+
+  @typedoc "Reasons `patch/3` can fail."
+  @type patch_error ::
+          {:copy_out_of_range, non_neg_integer(), non_neg_integer()}
+          | {:output_too_large, non_neg_integer(), non_neg_integer()}
 
   @doc """
   Computes the signature of `basis`.
@@ -133,7 +138,7 @@ defmodule Rexd do
   malformed `Rexd.Delta` struct (a delta returned by `delta/2` or
   `Rexd.Delta.decode/1` is always well-formed).
   """
-  @spec patch(binary(), Delta.t(), keyword()) :: {:ok, binary()} | {:error, Patch.error()}
+  @spec patch(binary(), Delta.t(), keyword()) :: {:ok, binary()} | {:error, patch_error()}
   defdelegate patch(basis, delta, opts \\ []), to: Patch, as: :apply_delta
 
   @doc """
