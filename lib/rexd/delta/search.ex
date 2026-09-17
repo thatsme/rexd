@@ -19,6 +19,13 @@ defmodule Rexd.Delta.Search do
   #
   # `Context` is fixed for the whole search. `Output` changes only when a
   # window hits the index, so the per-byte path allocates nothing.
+  #
+  # Shaped for speed (see NOTES.md, "Code shaped by performance"):
+  #
+  #   * Misses are handled inline in scan/4 rather than through a uniform
+  #     classify-then-record step, which cost two extra calls per byte.
+  #   * advance/4 destructures Context once instead of using ctx.field, which
+  #     compiles to a separate map match per access.
 
   alias Rexd.{Delta, RabinKarp, Signature}
 
@@ -86,6 +93,7 @@ defmodule Rexd.Delta.Search do
 
   # -- phase 1: full windows ------------------------------------------------------
 
+  # Per-byte hot path: keep the miss branch free of extra calls.
   defp scan(pos, weak, %Context{index: index} = ctx, out) do
     case index do
       %{^weak => candidates} -> weak_hit(pos, weak, candidates, ctx, out)
@@ -106,6 +114,7 @@ defmodule Rexd.Delta.Search do
     end
   end
 
+  # Per-byte hot path: one destructuring match instead of five ctx.field lookups.
   defp advance(pos, weak, %Context{last_full: last_full} = ctx, out) when pos < last_full do
     %Context{new: new, block_len: block_len, mult: mult, adj: adj} = ctx
 

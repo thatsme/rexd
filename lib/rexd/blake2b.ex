@@ -8,10 +8,25 @@ defmodule Rexd.Blake2b do
   BLAKE2b-512: the digest length is part of the parameter block mixed into
   the initial state. `:crypto` only provides BLAKE2b-512, hence this module.
 
-  Every 64-bit word is carried as two 32-bit halves (`hi`, `lo`) so that
-  additions, XORs and rotations stay within the BEAM small-integer range and
-  never allocate. The twelve rounds of the compression function are unrolled
-  at compile time into a single function body of plain variable bindings.
+  ## Why the code looks like this
+
+  The straightforward implementation (64-bit words in a tuple, a `g/7`
+  function applied per round) is about 18 times slower, and the strong hash
+  bounds the speed of `Rexd.signature/2`. Two choices trade readability for
+  that factor:
+
+    * **Split words.** BEAM small integers hold 60 bits, so 64-bit additions
+      and rotations allocate a bignum almost every time. Each word is carried
+      as two 32-bit halves (`hi`, `lo`) with the carry propagated by hand, so
+      nothing allocates.
+    * **Compile-time unrolling.** The twelve rounds are generated as one
+      function body of plain variable bindings, avoiding tuple reads and
+      writes and per-round calls. The generator below mirrors RFC 7693
+      section 3: `mix` is G, `columns_then_diagonals` the index sets, `init`
+      and `finalize` the state set-up and feed-forward.
+
+  Correctness is checked against `b2sum -l 256` and committed digests. See
+  NOTES.md, "Code shaped by performance", for measurements.
   """
 
   import Bitwise

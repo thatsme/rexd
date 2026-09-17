@@ -91,3 +91,30 @@ Differences, none of which affect the wire format:
   matching weak checksum, which can only succeed through a hash collision.
 - **Literals reference the input.** Literal commands are sub-binaries of the
   new data, not copies.
+
+## Code shaped by performance
+
+Where a faster form of the code is harder to read than the obvious one, the
+obvious form was measured first and the faster form is kept only for a
+material gain. Each case below also carries a comment at the code site.
+
+Measurements: Apple Silicon laptop, Elixir 1.19 / OTP 28 with the JIT,
+random data, `block_len` 2048, `strong_sum_len` 32.
+
+| Where | Readable form | Kept form | Gain |
+|-------|---------------|-----------|------|
+| `Rexd.Blake2b` | state in a tuple, `g/7` per round | rounds unrolled at compile time into variable bindings | 3.4 → 5.1 MB/s |
+| `Rexd.Blake2b` | 64-bit words | each word as two 32-bit halves | 5.1 → 63.1 MB/s |
+| `Rexd.Delta.Search.scan/4` | classify every window, then record the result | misses handled inline | 32.6 → 35.7 MB/s on unmatched data |
+| `Rexd.Delta.Search.advance/4` | `ctx.field` for each value | one destructuring match | 26.5 → 32.6 MB/s on unmatched data |
+| `Rexd.RabinKarp.rotate/5` | constants recomputed per step | `MULT^n` and `MULT^n·ADJ` passed in | avoids bignum products on every byte |
+
+The reverse trade was also made once. The delta search was first written as
+a single loop with nine positional arguments, which ran at 43.7 MB/s on
+unmatched data. It was restructured around the `Context` and `Output`
+structs for clarity at a cost of about 18%, since the result stays well above
+the 20 MB/s design target.
+
+One apparent optimisation was rejected: splitting `h·MULT` in RabinKarp into
+16-bit halves to avoid occasional bignums measured 305 MB/s against 473 MB/s
+for the plain product.

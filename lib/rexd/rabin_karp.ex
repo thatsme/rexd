@@ -20,6 +20,10 @@ defmodule Rexd.RabinKarp do
   `rollout/4`. The per-byte work is then `h·MULT` (below 2^59.01) and
   `MULT^n·out` (below 2^40): no bignum is built on the rolling path except
   for the rare `h·MULT` whose `h` lies within about 1% of 2^32.
+
+  The multiplication `h·MULT` is deliberately left whole. Splitting it into
+  16-bit halves keeps every product small but measured about 35% slower,
+  because the rare bignum costs less than the extra arithmetic on every byte.
   """
 
   import Bitwise
