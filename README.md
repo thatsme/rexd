@@ -36,7 +36,7 @@ Rexd is not yet published on Hex. Add it from Git:
 ```elixir
 def deps do
   [
-    {:rexd, github: "thatsme/rexd"}
+    {:rexd, github: "thatsme/rexd", tag: "v1.0.0"}
   ]
 end
 ```

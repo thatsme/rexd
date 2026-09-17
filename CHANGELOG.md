@@ -6,12 +6,15 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-17
+
+First release.
+
 ### Added
 
-- `Rexd.signature/2`, `Rexd.delta/2` and `Rexd.patch/3` over binaries.
+- `Rexd.signature/2`, `Rexd.delta/3` and `Rexd.patch/3` over binaries.
 - `Rexd.Signature` and `Rexd.Delta` encoding and decoding in the librsync 2.x
-  wire format (`RS_RK_BLAKE2_SIG_MAGIC` signatures), verified against
-  `rdiff` 2.3.4.
+  wire format, verified against `rdiff` from librsync 2.3.2 and 2.3.4.
 - `Rexd.Stream.signature/2`, `Rexd.Stream.delta/2` and `Rexd.Stream.patch/3`
   over enumerables of binaries, with bounded memory, and `Rexd.StreamError`.
 - `Rexd.Blake2b`: BLAKE2b-256 in pure Elixir.
@@ -24,5 +27,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
   and `patch/4` on the receiver. In-place deltas remain ordinary librsync
   deltas.
 - `Rexd.Delta.Stats`: literal and copy bytes and command counts, plus search
-  counters, from `Rexd.delta_with_stats/2`, `Rexd.Delta.stats/1` and the
+  counters, from `Rexd.delta_with_stats/3`, `Rexd.Delta.stats/1` and the
   `:on_stats` option of `Rexd.Stream.delta/3`.
+
+[Unreleased]: https://github.com/thatsme/rexd/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/thatsme/rexd/releases/tag/v1.0.0
