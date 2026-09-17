@@ -44,17 +44,27 @@ defmodule Rexd.MixProject do
 
   defp package do
     [
-      licenses: ["MIT"],
+      licenses: ["Apache-2.0"],
       maintainers: ["thatsme"],
-      links: %{"GitHub" => @source_url},
-      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md NOTES.md BENCH.md)
+      links: %{
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+      },
+      files: ~w(lib mix.exs README.md LICENSE NOTICE CHANGELOG.md NOTES.md BENCH.md)
     ]
   end
 
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "NOTES.md", "BENCH.md", "CHANGELOG.md"],
+      extras: [
+        "README.md",
+        "NOTES.md",
+        "BENCH.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md"
+      ],
       source_ref: "v#{@version}",
       source_url: @source_url,
       groups_for_modules: [

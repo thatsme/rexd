@@ -1,0 +1,11 @@
+Rexd
+Copyright 2026 thatsme
+
+This product is licensed under the Apache License, Version 2.0.
+
+lib/rexd/delta/prototab.ex lists the delta command opcodes of the librsync
+wire format. It is generated from src/prototab.c of librsync 2.3.4
+(https://github.com/librsync/librsync), which is distributed under the GNU
+Lesser General Public License, version 2.1 or later. No librsync source code
+is included in Rexd; the signature, delta and patch algorithms are an
+independent implementation of the librsync formats.

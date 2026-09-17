@@ -166,7 +166,10 @@ rdiff patch basis.bin update.delta rebuilt.bin
   of untrusted input, and code shaped by performance.
 - [BENCH.md](BENCH.md): throughput and memory measurements.
 - [CHANGELOG.md](CHANGELOG.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md): development setup, test suite and checks.
+- [SECURITY.md](SECURITY.md): reporting vulnerabilities, and known
+  limitations with untrusted input.
 
 ## License
 
-MIT. See the `LICENSE` file.
+Apache License 2.0. See the `LICENSE` and `NOTICE` files.
