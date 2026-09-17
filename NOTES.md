@@ -172,8 +172,8 @@ delta format.
   binary search. Finished copies are skipped through a next-pointer structure
   with path compression, so no range is scanned twice past finished copies. A
   delta constructed with 20 000 copies reading the output of 20 000 others,
-  400 million dependencies, is ordered in about a second; without path
-  compression the same delta takes minutes.
+  400 million dependencies, is ordered in about a second; with a linear skip
+  in place of path compression it exceeds the test's five-second bound.
 - **Common edits need no conversion.** An insertion moves later data forward
   and a deletion moves it backward; both produce overlapping copies but no
   cycles. Cycles arise when regions trade places, and cost the bytes of the
