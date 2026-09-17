@@ -34,7 +34,7 @@ defmodule Rexd.Stream do
   """
 
   alias Rexd.{Delta, Patch, Signature, StreamError}
-  alias Rexd.Delta.Search
+  alias Rexd.Delta.{Search, Stats}
 
   @chunk_size 65_536
   @max_literal 65_536
@@ -98,6 +98,11 @@ defmodule Rexd.Stream do
   Streams the encoded delta from the basis described by `signature` to the
   new data read from `enumerable`.
 
+  ## Options
+
+    * `:on_stats` - a function called with `Rexd.Delta.Stats` once the last
+      command has been produced, before the end marker is emitted.
+
       iex> basis = String.duplicate("0123456789", 50)
       iex> new = ["prefix ", basis, " suffix"]
       iex> sig = Rexd.signature(basis, block_len: 16)
@@ -105,30 +110,44 @@ defmodule Rexd.Stream do
       iex> Rexd.patch(basis, delta) == {:ok, IO.iodata_to_binary(new)}
       true
   """
-  @spec delta(Signature.t(), Enumerable.t()) :: Enumerable.t()
-  def delta(%Signature{} = signature, enumerable) do
+  @spec delta(Signature.t(), Enumerable.t(), keyword()) :: Enumerable.t()
+  def delta(%Signature{} = signature, enumerable, opts \\ []) do
+    on_stats =
+      opts |> Keyword.validate!(on_stats: nil) |> Keyword.fetch!(:on_stats) |> valid_on_stats!()
+
     commands =
       enumerable
       |> rechunk(@chunk_size)
       |> Stream.transform(
-        fn -> Search.new(signature, @max_literal) end,
+        fn -> {Search.new(signature, @max_literal), %Stats{}} end,
         &delta_chunk/2,
-        &delta_end/1,
-        fn _search -> :ok end
+        &delta_end(&1, on_stats),
+        fn _state -> :ok end
       )
 
     Stream.concat([Delta.encode_header()], commands)
   end
 
-  defp delta_chunk(chunk, search) do
+  defp valid_on_stats!(nil), do: nil
+  defp valid_on_stats!(fun) when is_function(fun, 1), do: fun
+
+  defp valid_on_stats!(other),
+    do: raise(ArgumentError, "on_stats must be a 1-arity function, got: #{inspect(other)}")
+
+  defp delta_chunk(chunk, {search, stats}) do
     {commands, search} = Search.feed(search, chunk)
-    {encoded_commands(commands), search}
+    {encoded_commands(commands), {search, Stats.add_commands(stats, commands)}}
   end
 
-  defp delta_end(search) do
-    {commands, _stats} = Search.finish(search)
-    {encoded_commands(commands) ++ [Delta.encode_end()], search}
+  defp delta_end({search, stats}, on_stats) do
+    {commands, counters} = Search.finish(search)
+    stats = stats |> struct(counters) |> Stats.add_commands(commands)
+    report_stats(on_stats, stats)
+    {encoded_commands(commands) ++ [Delta.encode_end()], {search, stats}}
   end
+
+  defp report_stats(nil, _stats), do: :ok
+  defp report_stats(on_stats, stats), do: on_stats.(stats)
 
   defp encoded_commands([]), do: []
   defp encoded_commands(commands), do: [IO.iodata_to_binary(Delta.encode_commands(commands))]

@@ -166,6 +166,39 @@ defmodule Rexd.StreamTest do
     end
   end
 
+  property "delta/3 reports the same statistics as Rexd.delta_with_stats/2" do
+    check all basis <- binary(max_length: 5000),
+              insert <- binary(max_length: 500),
+              cut <- integer(0..5000),
+              sizes <- chunk_sizes() do
+      new = edited(basis, cut, insert)
+      sig = Rexd.signature(basis, block_len: 64)
+      test_pid = self()
+
+      sig
+      |> Rexd.Stream.delta(split(new, sizes), on_stats: &send(test_pid, {:stats, &1}))
+      |> Stream.run()
+
+      assert_received {:stats, streamed}
+      {delta, whole} = Rexd.delta_with_stats(sig, new)
+      assert streamed == whole
+
+      assert streamed == %{
+               Delta.stats(delta)
+               | weak_hits: whole.weak_hits,
+                 false_weak_hits: whole.false_weak_hits
+             }
+
+      assert streamed.literal_bytes + streamed.copy_bytes == byte_size(new)
+    end
+  end
+
+  test "delta/3 rejects an invalid on_stats option" do
+    assert_raise ArgumentError, fn ->
+      Rexd.Stream.delta(Rexd.signature(""), [], on_stats: :nope)
+    end
+  end
+
   test "delta/2 with an empty stream or an empty signature" do
     sig = Rexd.signature("abc", block_len: 2)
     assert sig |> Rexd.Stream.delta([]) |> Enum.join() == encode_delta(%Delta{commands: []})

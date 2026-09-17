@@ -23,7 +23,7 @@ defmodule Rexd.Delta do
   known.
   """
 
-  alias Rexd.Delta.{Prototab, Search}
+  alias Rexd.Delta.{Prototab, Search, Stats}
   alias Rexd.Signature
 
   @magic 0x72730236
@@ -44,13 +44,6 @@ defmodule Rexd.Delta do
           | {:zero_length, :literal | :copy}
           | {:argument_too_large, non_neg_integer()}
 
-  @typedoc """
-  Search counters: `weak_hits` windows whose weak checksum was in the index
-  (each costs one strong hash), `false_weak_hits` of those whose strong hash
-  matched no candidate.
-  """
-  @type stats :: %{weak_hits: non_neg_integer(), false_weak_hits: non_neg_integer()}
-
   @doc "The delta magic number."
   @spec magic() :: non_neg_integer()
   def magic, do: @magic
@@ -62,12 +55,22 @@ defmodule Rexd.Delta do
     delta
   end
 
-  @doc false
-  @spec compute_with_stats(Signature.t(), binary()) :: {t(), stats()}
+  @doc "Like `compute/2`, also returning statistics. See `Rexd.delta_with_stats/2`."
+  @spec compute_with_stats(Signature.t(), binary()) :: {t(), Stats.t()}
   def compute_with_stats(%Signature{} = sig, new) when is_binary(new) do
-    {commands, stats} = Search.run(sig, new)
-    {%__MODULE__{commands: commands}, stats}
+    {commands, search} = Search.run(sig, new)
+    {%__MODULE__{commands: commands}, Stats.add_commands(struct(Stats, search), commands)}
   end
+
+  @doc """
+  Statistics computed from the commands of `delta`. The search counters are
+  `nil`.
+
+      iex> Rexd.Delta.stats(%Rexd.Delta{commands: [{:literal, "abc"}, {:copy, 0, 10}]})
+      %Rexd.Delta.Stats{literal_bytes: 3, literal_commands: 1, copy_bytes: 10, copy_commands: 1}
+  """
+  @spec stats(t()) :: Stats.t()
+  def stats(%__MODULE__{commands: commands}), do: Stats.add_commands(%Stats{}, commands)
 
   # ---------------------------------------------------------------------------
   # Wire format

@@ -183,7 +183,7 @@ defmodule Rexd.DeltaTest do
       basis = :crypto.strong_rand_bytes(1_000_000)
       new = :crypto.strong_rand_bytes(1_000_000)
       sig = Rexd.signature(basis, block_len: 128)
-      {delta, stats} = Delta.compute_with_stats(sig, new)
+      {delta, stats} = Rexd.delta_with_stats(sig, new)
       assert Rexd.patch(basis, delta) == {:ok, new}
       windows = byte_size(new)
       # ~7800 blocks against ~1M windows: expected false hits ~ 1M * 7800 / 2^32 ~ 2.
@@ -202,7 +202,7 @@ defmodule Rexd.DeltaTest do
       basis = text.(1, 100_000)
       new = text.(2, 100_000)
       sig = Rexd.signature(basis, block_len: 64)
-      {delta, stats} = Delta.compute_with_stats(sig, new)
+      {delta, stats} = Rexd.delta_with_stats(sig, new)
       assert Rexd.patch(basis, delta) == {:ok, new}
       assert stats.false_weak_hits / byte_size(new) < 1.0e-3
     end

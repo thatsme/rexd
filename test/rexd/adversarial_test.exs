@@ -206,7 +206,7 @@ defmodule Rexd.AdversarialTest do
       sig =
         colliding_signature(block_len, 50_000, RabinKarp.hash(binary_part(zeros, 0, block_len)))
 
-      {micros, {delta, stats}} = :timer.tc(fn -> Delta.compute_with_stats(sig, zeros) end)
+      {micros, {delta, stats}} = :timer.tc(fn -> Rexd.delta_with_stats(sig, zeros) end)
       assert delta.commands == [{:literal, zeros}]
       assert stats.false_weak_hits == byte_size(zeros) - block_len + 1
       # A linear scan of 50 000 candidates per window takes minutes here.

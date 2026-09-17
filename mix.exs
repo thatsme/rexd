@@ -58,7 +58,7 @@ defmodule Rexd.MixProject do
       source_ref: "v#{@version}",
       source_url: @source_url,
       groups_for_modules: [
-        Core: [Rexd, Rexd.Signature, Rexd.Delta, Rexd.Patch],
+        Core: [Rexd, Rexd.Signature, Rexd.Delta, Rexd.Delta.Stats, Rexd.Patch],
         Streaming: [Rexd.Stream, Rexd.StreamError],
         Checksums: [Rexd.RabinKarp, Rexd.Blake2b]
       ]

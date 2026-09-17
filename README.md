@@ -60,7 +60,8 @@ wire = delta |> Rexd.Delta.encode() |> IO.iodata_to_binary()
 ```
 
 `Rexd.recommended_block_len/1` returns the block length `rdiff` would choose
-for a given input size.
+for a given input size. `Rexd.delta_with_stats/2` also returns how many bytes
+the delta carries as literals and how many it copies from the basis.
 
 ### Files and other streams
 

@@ -72,6 +72,7 @@ defmodule Rexd.Delta.Search do
   defstruct [:ctx, :max_literal, :out, pos: 0, weak: nil]
 
   @type t :: %__MODULE__{}
+  @type search_counters :: %{weak_hits: non_neg_integer(), false_weak_hits: non_neg_integer()}
 
   @doc false
   @spec new(Signature.t(), pos_integer() | :infinity) :: t()
@@ -111,14 +112,14 @@ defmodule Rexd.Delta.Search do
 
   @doc false
   # Ends the input. Returns the remaining commands and the search counters.
-  @spec finish(t()) :: {[Delta.command()], Delta.stats()}
+  @spec finish(t()) :: {[Delta.command()], search_counters()}
   def finish(%__MODULE__{ctx: ctx} = search) do
     {:done, out} = resume(search, %{ctx | final?: true})
     {Enum.reverse(out.commands), stats(out)}
   end
 
   @doc false
-  @spec run(Signature.t(), binary()) :: {[Delta.command()], Delta.stats()}
+  @spec run(Signature.t(), binary()) :: {[Delta.command()], search_counters()}
   def run(%Signature{} = sig, new) when is_binary(new) do
     {ready, search} = sig |> new(:infinity) |> feed(new)
     {rest, stats} = finish(search)

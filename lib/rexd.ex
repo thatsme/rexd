@@ -61,6 +61,19 @@ defmodule Rexd do
   defdelegate delta(signature, new), to: Delta, as: :compute
 
   @doc """
+  Like `delta/2`, also returning `Rexd.Delta.Stats` for the delta and the
+  search.
+
+      iex> basis = String.duplicate("0123456789abcdef", 4)
+      iex> sig = Rexd.signature(basis, block_len: 16)
+      iex> {_delta, stats} = Rexd.delta_with_stats(sig, "xyz" <> basis)
+      iex> {stats.literal_bytes, stats.copy_bytes, stats.copy_commands}
+      {3, 64, 1}
+  """
+  @spec delta_with_stats(Signature.t(), binary()) :: {Delta.t(), Delta.Stats.t()}
+  defdelegate delta_with_stats(signature, new), to: Delta, as: :compute_with_stats
+
+  @doc """
   Rebuilds the new binary by applying `delta` to `basis`.
 
       iex> basis = "the quick brown fox jumps over the lazy dog"

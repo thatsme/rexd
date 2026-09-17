@@ -18,3 +18,6 @@ project adheres to [Semantic Versioning](https://semver.org/).
   Elixir.
 - `Rexd.recommended_block_len/1`, matching `rdiff`'s default block length.
 - `:max_size` option for patching, bounding the output of untrusted deltas.
+- `Rexd.Delta.Stats`: literal and copy bytes and command counts, plus search
+  counters, from `Rexd.delta_with_stats/2`, `Rexd.Delta.stats/1` and the
+  `:on_stats` option of `Rexd.Stream.delta/3`.
