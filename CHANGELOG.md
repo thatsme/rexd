@@ -21,6 +21,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
   `Rexd.MD4` and the `Rexd.WeakChecksum` behaviour.
 - `Rexd.recommended_block_len/1`, matching `rdiff`'s default block length.
 - `:max_size` option for patching, bounding the output of untrusted deltas.
+- `Rexd.InPlace`: in-place patching following Rasch and Burns, with
+  `make_safe/2` and the `:in_place` option of `Rexd.delta/3` on the sender
+  and `patch/4` on the receiver. In-place deltas remain ordinary librsync
+  deltas.
 - `Rexd.Delta.Stats`: literal and copy bytes and command counts, plus search
   counters, from `Rexd.delta_with_stats/2`, `Rexd.Delta.stats/1` and the
   `:on_stats` option of `Rexd.Stream.delta/3`.

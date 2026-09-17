@@ -22,6 +22,9 @@ transport.
   the librsync delta command format. Verified against `rdiff` and `b2sum`.
 - Whole-binary functions and streaming variants over enumerables of binaries,
   with bounded memory.
+- In-place patching (Rasch and Burns) for storage without room for a second
+  copy, using ordinary librsync deltas.
+- Delta statistics: literal and copied bytes, search counters.
 - Hardened for untrusted input: decoders return error tuples on any byte
   sequence, and patching checks copy ranges and can cap the output size.
 - Pure Elixir, no runtime dependencies, no NIFs or ports.
@@ -100,6 +103,36 @@ read
 Streaming functions raise `Rexd.StreamError` when their input turns out to
 be invalid while the stream is consumed.
 
+### In-place patching
+
+Devices without room for a second copy can rebuild the new version inside the
+basis file. The sender produces a delta that is safe to apply in place; it is
+still an ordinary librsync delta that `rdiff patch` accepts.
+
+```elixir
+# Sender
+delta = Rexd.delta(signature, new, in_place: true)
+
+# Receiver, on the device
+{:ok, file} = :file.open("firmware.bin", [:read, :write, :binary, :raw])
+{:ok, basis_size} = :file.position(file, :eof)
+
+read = fn offset, length ->
+  {:ok, data} = :file.pread(file, offset, length)
+  data
+end
+
+write = fn offset, data -> :ok = :file.pwrite(file, offset, data) end
+
+{:ok, new_size} = Rexd.InPlace.patch(delta, basis_size, read, write)
+{:ok, _} = :file.position(file, new_size)
+:ok = :file.truncate(file)
+```
+
+Invalid deltas are rejected before anything is written, but an interrupted
+in-place patch leaves the file unusable, so it suits cases where the full new
+version can be fetched again. See `Rexd.InPlace`.
+
 ### Interoperating with rdiff
 
 Signatures and deltas can be exchanged with `rdiff` in either direction. Pass
@@ -124,7 +157,8 @@ rdiff patch basis.bin update.delta rebuilt.bin
 - With an unkeyed rolling checksum, data crafted against a known signature
   can make every window a weak-checksum hit, slowing delta computation to
   tens of kilobytes per second. See [NOTES.md](NOTES.md).
-- Patching writes a new copy; in-place patching is not supported.
+- In-place patching holds the delta's commands and literal data in memory
+  and cannot recover from an interruption part-way through.
 
 ## Documentation
 

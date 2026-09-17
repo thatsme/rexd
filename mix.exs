@@ -60,6 +60,7 @@ defmodule Rexd.MixProject do
       groups_for_modules: [
         Core: [Rexd, Rexd.Signature, Rexd.Delta, Rexd.Delta.Stats, Rexd.Patch],
         Streaming: [Rexd.Stream, Rexd.StreamError],
+        "In-place patching": [Rexd.InPlace],
         Checksums: [Rexd.WeakChecksum, Rexd.RabinKarp, Rexd.Rollsum, Rexd.Blake2b, Rexd.MD4]
       ]
     ]

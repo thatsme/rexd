@@ -147,6 +147,38 @@ and applier treats them as hostile.
   rolling checksum, and callers that compute deltas over data supplied by an
   untrusted party should bound the time spent.
 
+## In-place patching
+
+`Rexd.InPlace` follows Rasch and Burns, *In-Place Rsync: File Synchronization
+for Mobile and Wireless Devices* (USENIX ATC 2003), without changing the
+delta format.
+
+- **No destination offsets needed on the wire.** librsync commands carry no
+  output position, but each one follows from the lengths of the commands
+  before it, so both sides can compute where every copy writes. An in-place
+  delta is an ordinary delta: `rdiff patch` applies it front to back as
+  usual.
+- **Dependency graph.** Copy *i* must run before copy *j* when *i* reads a
+  byte *j* writes. A copy overlapping its own destination is not a
+  dependency; it is applied in the direction that never reads an overwritten
+  byte. Literals read nothing and are written last.
+- **Cycles.** When a depth-first search closes a cycle, the sender converts
+  the shortest copy on it into a literal (the "locally minimum" policy of the
+  paper), unwinds only the part of the search below that copy, and
+  continues. The receiver runs the same search and rejects a delta that still
+  contains a cycle, before writing anything.
+- **Linear-time traversal.** Output ranges are disjoint and in order, so the
+  copies a given copy depends on form one contiguous index range, found by
+  binary search. Finished copies are skipped through a next-pointer structure
+  with path compression, so no range is scanned twice past finished copies. A
+  delta constructed with 20 000 copies reading the output of 20 000 others,
+  400 million dependencies, is ordered in about a second; without path
+  compression the same delta takes minutes.
+- **Common edits need no conversion.** An insertion moves later data forward
+  and a deletion moves it backward; both produce overlapping copies but no
+  cycles. Cycles arise when regions trade places, and cost the bytes of the
+  shorter region.
+
 ## Streaming
 
 `Rexd.Stream` shares its algorithms with the whole-binary functions rather

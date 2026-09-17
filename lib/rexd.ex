@@ -29,13 +29,14 @@ defmodule Rexd do
       wire formats.
     * `Rexd.Stream` - the same operations over enumerables of binaries, in
       bounded memory.
+    * `Rexd.InPlace` - rebuilding the new version inside the basis storage.
     * `Rexd.RabinKarp`, `Rexd.Rollsum`, `Rexd.Blake2b`, `Rexd.MD4` - the
       rolling checksums and strong hashes.
   """
 
   import Bitwise
 
-  alias Rexd.{Delta, Patch, Signature}
+  alias Rexd.{Delta, InPlace, Patch, Signature}
 
   @doc """
   Computes the signature of `basis`.
@@ -61,12 +62,21 @@ defmodule Rexd do
 
   The signature's weak-checksum index is built on entry when absent; call
   `Rexd.Signature.build_index/1` once to reuse it across several deltas.
+
+  ## Options
+
+    * `:in_place` - when `true`, the delta can also be applied in place with
+      `Rexd.InPlace.patch/4`: copies that would close a dependency cycle are
+      sent as literals instead. Default `false`.
   """
-  @spec delta(Signature.t(), binary()) :: Delta.t()
-  defdelegate delta(signature, new), to: Delta, as: :compute
+  @spec delta(Signature.t(), binary(), keyword()) :: Delta.t()
+  def delta(%Signature{} = signature, new, opts \\ []) when is_binary(new) do
+    {delta, _stats} = delta_with_stats(signature, new, opts)
+    delta
+  end
 
   @doc """
-  Like `delta/2`, also returning `Rexd.Delta.Stats` for the delta and the
+  Like `delta/3`, also returning `Rexd.Delta.Stats` for the delta and the
   search.
 
       iex> basis = String.duplicate("0123456789abcdef", 4)
@@ -75,8 +85,23 @@ defmodule Rexd do
       iex> {stats.literal_bytes, stats.copy_bytes, stats.copy_commands}
       {3, 64, 1}
   """
-  @spec delta_with_stats(Signature.t(), binary()) :: {Delta.t(), Delta.Stats.t()}
-  defdelegate delta_with_stats(signature, new), to: Delta, as: :compute_with_stats
+  @spec delta_with_stats(Signature.t(), binary(), keyword()) :: {Delta.t(), Delta.Stats.t()}
+  def delta_with_stats(%Signature{} = signature, new, opts \\ []) when is_binary(new) do
+    opts = Keyword.validate!(opts, in_place: false)
+    {delta, stats} = Delta.compute_with_stats(signature, new)
+    in_place(delta, stats, new, Keyword.fetch!(opts, :in_place))
+  end
+
+  defp in_place(delta, stats, _new, false), do: {delta, stats}
+
+  defp in_place(delta, stats, new, true) do
+    safe = InPlace.make_safe(delta, new)
+    counters = Map.take(stats, [:weak_hits, :false_weak_hits])
+    {safe, struct(Delta.stats(safe), counters)}
+  end
+
+  defp in_place(_delta, _stats, _new, other),
+    do: raise(ArgumentError, "in_place must be a boolean, got: #{inspect(other)}")
 
   @doc """
   Rebuilds the new binary by applying `delta` to `basis`.
