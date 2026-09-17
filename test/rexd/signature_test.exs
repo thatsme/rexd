@@ -89,8 +89,8 @@ defmodule Rexd.SignatureTest do
       sig =
         Rexd.signature(:binary.copy("abcd", 3) <> "wxyz", block_len: 4) |> Signature.build_index()
 
-      assert sig.index[RabinKarp.hash("abcd")] == [{0, Signature.strong("abcd", 32)}]
-      assert sig.index[RabinKarp.hash("wxyz")] == [{3, Signature.strong("wxyz", 32)}]
+      assert sig.index[RabinKarp.hash("abcd")] == %{Signature.strong("abcd", 32) => 0}
+      assert sig.index[RabinKarp.hash("wxyz")] == %{Signature.strong("wxyz", 32) => 3}
       assert map_size(sig.index) == 2
     end
   end

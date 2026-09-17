@@ -100,6 +100,33 @@ Differences, none of which affect the wire format:
 - **Literals reference the input.** Literal commands are sub-binaries of the
   new data, not copies.
 
+## Untrusted input
+
+Signatures and deltas usually arrive from another machine, so every decoder
+and applier treats them as hostile.
+
+- **Decoding** returns an error tuple for any byte sequence: truncation,
+  unknown or reserved opcodes, zero lengths, and arguments librsync would
+  read as negative. Mutation-based property tests (bit flips, insertions,
+  deletions, truncation of valid encodings) check that no other exception
+  escapes, and that the streaming and whole-binary patchers reject exactly
+  the same corrupted deltas.
+- **Patching** validates every copy against the basis and computes the
+  output size before building output; `:max_size` bounds it. Implausible
+  lengths (a literal or copy claiming 2^62 bytes) fail without allocating.
+- **Signature index.** A signature can be crafted so that many blocks share
+  one weak checksum. The index maps each weak checksum to a map keyed by
+  strong hash, so building it and looking a window up stay constant-time per
+  block; with a list of candidates instead, 200 000 such blocks take minutes
+  to index and every matching window scans all of them.
+- **Crafted weak collisions.** RabinKarp is not keyed. Anyone who knows the
+  signature can construct new data in which every window matches some weak
+  checksum, forcing a BLAKE2b computation per input byte and slowing the
+  delta to roughly 30 KB/s with `block_len` 2048. The output remains
+  correct. librsync has the same property; it is inherent to an unkeyed
+  rolling checksum, and callers that compute deltas over data supplied by an
+  untrusted party should bound the time spent.
+
 ## Streaming
 
 `Rexd.Stream` shares its algorithms with the whole-binary functions rather

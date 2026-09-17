@@ -256,7 +256,7 @@ defmodule Rexd.Delta.Search do
   defp confirm(strong, weak, candidates, ctx, next_block) do
     case next_block_checksums(ctx, next_block) do
       {^weak, ^strong} -> {:match, next_block}
-      _ -> candidate_match(List.keyfind(candidates, strong, 1))
+      _ -> candidate_match(Map.fetch(candidates, strong))
     end
   end
 
@@ -264,8 +264,8 @@ defmodule Rexd.Delta.Search do
   defp next_block_checksums(%Context{block_count: count}, next) when next >= count, do: nil
   defp next_block_checksums(%Context{blocks: blocks}, next), do: elem(blocks, next)
 
-  defp candidate_match({block, _strong}), do: {:match, block}
-  defp candidate_match(nil), do: :false_hit
+  defp candidate_match({:ok, block}), do: {:match, block}
+  defp candidate_match(:error), do: :false_hit
 
   # -- output ------------------------------------------------------------------
 

@@ -17,9 +17,12 @@ defmodule Rexd.Signature do
   The format does not record the basis length, so a decoded signature cannot
   tell whether its last block is short.
 
-  `index` maps each weak checksum to the blocks carrying it. It is not part
-  of the wire format; `build_index/1` fills it and `Rexd.delta/2` calls that
-  when the index is missing.
+  `index` maps each weak checksum to the strong hashes seen with it, and each
+  of those to a block number. It is not part of the wire format;
+  `build_index/1` fills it and `Rexd.delta/2` calls that when the index is
+  missing. Building and querying it take constant time per block however the
+  checksums are distributed, so a signature crafted to share one weak
+  checksum across many blocks costs no more to process than any other.
   """
 
   alias Rexd.{Blake2b, RabinKarp}
@@ -41,8 +44,8 @@ defmodule Rexd.Signature do
   @typedoc "Weak checksum and truncated strong hash of one block."
   @type block :: {RabinKarp.t(), binary()}
 
-  @typedoc "Weak checksum to `{block_no, strong}` pairs, in ascending block order."
-  @type index :: %{RabinKarp.t() => [{non_neg_integer(), binary()}]}
+  @typedoc "Weak checksum to strong hash to the lowest block number carrying both."
+  @type index :: %{RabinKarp.t() => %{binary() => non_neg_integer()}}
 
   @type t :: %__MODULE__{
           block_len: pos_integer(),
@@ -184,20 +187,10 @@ defmodule Rexd.Signature do
     index =
       blocks
       |> Enum.with_index()
-      |> Enum.reduce(%{}, fn {{weak, strong}, block_no}, acc ->
-        Map.update(acc, weak, [{block_no, strong}], &add_candidate(&1, block_no, strong))
+      |> Enum.reduce(%{}, fn {{weak, strong}, block_no}, index ->
+        Map.update(index, weak, %{strong => block_no}, &Map.put_new(&1, strong, block_no))
       end)
-      |> Map.new(fn {weak, candidates} -> {weak, Enum.reverse(candidates)} end)
 
     %{sig | index: index}
-  end
-
-  # Candidates are accumulated newest-first; a strong hash already present
-  # belongs to a lower-numbered block and wins.
-  defp add_candidate(candidates, block_no, strong) do
-    case List.keyfind(candidates, strong, 1) do
-      nil -> [{block_no, strong} | candidates]
-      _lower_block -> candidates
-    end
   end
 end
