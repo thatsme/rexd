@@ -135,7 +135,7 @@ than reimplementing them.
 - **Signature.** Input is grouped into whole blocks and signed with
   `Rexd.Signature`; the output is byte-identical to
   `Rexd.Signature.encode/1`.
-- **Delta.** The search in `Rexd.Delta.Search` is resumable: it consumes
+- **Delta.** The search (`lib/rexd/delta/search.ex`) is resumable: it consumes
   input in chunks and suspends when the rolling window reaches the end of
   the buffered data, recording the window position and its weak checksum.
   `Rexd.delta/2` is the same search fed once. Matches are therefore
@@ -144,7 +144,7 @@ than reimplementing them.
   chunk, as librsync bounds literals to `MAX_DELTA_CMD`. Bytes already
   covered by emitted commands are dropped from the buffer once they make up
   at least half of it, which keeps both memory and copying linear.
-- **Patch.** `Rexd.Delta.next_command/1` decodes one command at a time and
+- **Patch.** A single-command decoder in `lib/rexd/delta.ex` decodes one command at a time and
   serves both `Rexd.Delta.decode/1` and the streaming patcher. Literal data
   is passed through as it arrives; copies are read from the basis lazily, in
   pieces of at most 64 KiB, so a single large copy never materialises in
@@ -166,8 +166,8 @@ random data, `block_len` 2048, `strong_sum_len` 32.
 |-------|---------------|-----------|------|
 | `Rexd.Blake2b` | state in a tuple, `g/7` per round | rounds unrolled at compile time into variable bindings | 3.4 → 5.1 MB/s |
 | `Rexd.Blake2b` | 64-bit words | each word as two 32-bit halves | 5.1 → 63.1 MB/s |
-| `Rexd.Delta.Search.scan/4` | classify every window, then record the result | misses handled inline | 32.6 → 35.7 MB/s on unmatched data |
-| `Rexd.Delta.Search.advance/4` | `ctx.field` for each value | one destructuring match | 26.5 → 32.6 MB/s on unmatched data |
+| `scan/4` in `lib/rexd/delta/search.ex` | classify every window, then record the result | misses handled inline | 32.6 → 35.7 MB/s on unmatched data |
+| `advance/4` in `lib/rexd/delta/search.ex` | `ctx.field` for each value | one destructuring match | 26.5 → 32.6 MB/s on unmatched data |
 | `Rexd.RabinKarp.rotate/5` | constants recomputed per step | `MULT^n` and `MULT^n·ADJ` passed in | avoids bignum products on every byte |
 
 The reverse trade was also made once. The delta search was first written as

@@ -47,15 +47,21 @@ defmodule Rexd.MixProject do
       licenses: ["MIT"],
       maintainers: ["thatsme"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md NOTES.md)
+      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md NOTES.md BENCH.md)
     ]
   end
 
   defp docs do
     [
-      main: "Rexd",
+      main: "readme",
+      extras: ["README.md", "NOTES.md", "BENCH.md", "CHANGELOG.md"],
       source_ref: "v#{@version}",
-      source_url: @source_url
+      source_url: @source_url,
+      groups_for_modules: [
+        Core: [Rexd, Rexd.Signature, Rexd.Delta, Rexd.Patch],
+        Streaming: [Rexd.Stream, Rexd.StreamError],
+        Checksums: [Rexd.RabinKarp, Rexd.Blake2b]
+      ]
     ]
   end
 end

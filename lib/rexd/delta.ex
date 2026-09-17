@@ -11,7 +11,7 @@ defmodule Rexd.Delta do
 
   Wire format: u32 `RS_DELTA_MAGIC` (`0x72730236`), then one command per
   opcode byte, then an END byte (`0x00`). The opcode selects the command kind
-  and the widths of its big-endian arguments; see `Rexd.Delta.Prototab`,
+  and the widths of its big-endian arguments; see `lib/rexd/delta/prototab.ex`,
   generated from librsync's `prototab.c`. Encoding follows librsync's
   `emit.c`: literals of 1..64 bytes carry their length in the opcode, longer
   literals and both copy arguments use the smallest width that fits.

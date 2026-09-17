@@ -12,9 +12,24 @@ defmodule Rexd do
   version. Only the signature and the delta cross the wire, so the cost of
   a transfer scales with what changed rather than with the file size.
 
-  Weak checksums are RabinKarp (`Rexd.RabinKarp`), strong hashes are
-  BLAKE2b-256 (`Rexd.Blake2b`), and `Rexd.Signature` and `Rexd.Delta` read
-  and write the formats used by librsync and `rdiff`.
+  ## Example
+
+      iex> basis = String.duplicate("the quick brown fox jumps over the lazy dog. ", 20)
+      iex> new = String.replace(basis, "lazy", "sleepy", global: false)
+      iex> signature = Rexd.signature(basis, block_len: 64)
+      iex> wire = signature |> Rexd.Signature.encode() |> IO.iodata_to_binary()
+      iex> {:ok, received} = Rexd.Signature.decode(wire)
+      iex> delta = Rexd.delta(received, new)
+      iex> Rexd.patch(basis, delta) == {:ok, new}
+      true
+
+  ## Modules
+
+    * `Rexd.Signature`, `Rexd.Delta` - the data structures and their librsync
+      wire formats.
+    * `Rexd.Stream` - the same operations over enumerables of binaries, in
+      bounded memory.
+    * `Rexd.RabinKarp`, `Rexd.Blake2b` - the weak and strong checksums.
   """
 
   import Bitwise
