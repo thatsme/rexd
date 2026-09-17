@@ -49,7 +49,7 @@ best run.
   a block at a time and pays one strong hash per block, so it runs close to
   signature speed. Where nothing matches, the window rolls one byte at a time
   and pays a map lookup per byte; that is the slowest ordinary case, about
-  32 MiB/s. Mixed data falls between the two.
+  30 MiB/s. Mixed data falls between the two.
 - **Patch** is a memory copy of the output. `Rexd.patch/3` runs at several
   GiB/s and varies with the allocator between runs; streaming patch is
   bounded by how fast the basis can be read and the output written.
