@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported versions, as declared in mix.exs.
+          - elixir: "1.17.0"
+            otp: "26.0"
+          - elixir: "1.18.4"
+            otp: "27.3"
+          # Newest versions; also runs the static checks.
+          - elixir: "1.19.5"
+            otp: "28.4"
+            lint: true
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install reference tools (rdiff, b2sum)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rdiff coreutils
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - run: mix deps.get
+
+      - name: No runtime dependencies
+        run: test "$(MIX_ENV=prod mix deps.tree --only prod | wc -l)" -eq 1
+
+      - run: mix compile --warnings-as-errors
+
+      - run: mix test
+
+      - name: Format
+        if: matrix.lint
+        run: mix format --check-formatted
+
+      - name: Credo
+        if: matrix.lint
+        run: mix credo --strict
+
+      - name: Dialyzer
+        if: matrix.lint
+        run: mix dialyzer
+
+      - name: Docs
+        if: matrix.lint
+        run: MIX_ENV=dev mix docs --warnings-as-errors
