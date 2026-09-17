@@ -1,9 +1,12 @@
 defmodule Rexd.Delta.Search do
   @moduledoc false
-  # The rsync delta search over a binary.
+  # The rsync delta search, resumable across chunks of input.
   #
-  # Phase 1 (scan): a full block_len window slides over `new` one byte at a
-  # time. Each window is classified against the signature:
+  # Input arrives through feed/2 and ends with finish/1; run/2 is a single feed
+  # followed by finish, so whole-binary and streaming deltas share this code.
+  #
+  # Phase 1 (scan): a full block_len window slides over the buffered input one
+  # byte at a time. Each window is classified against the signature:
   #
   #   * miss            - weak checksum not in the index
   #   * :false_hit      - weak checksum found, strong hash matches no block
@@ -13,12 +16,17 @@ defmodule Rexd.Delta.Search do
   # else rolls the window forward by one byte. Misses are by far the most
   # common case and are handled directly in scan/4.
   #
-  # Phase 2 (tail): once no full window fits, the window shrinks from the
-  # front. Only the last basis block can be shorter than block_len, so it is
-  # the only candidate.
+  # When the window reaches the end of the buffer before the input has ended,
+  # the search suspends and records where it stopped: the window position and
+  # its weak checksum, or nil when no window has been started there.
   #
-  # `Context` is fixed for the whole search. `Output` changes only when a
-  # window hits the index, so the per-byte path allocates nothing.
+  # Phase 2 (tail): once the input has ended and no full window fits, the
+  # window shrinks from the front. Only the last basis block can be shorter
+  # than block_len, so it is the only candidate.
+  #
+  # Between feeds, the buffer keeps only bytes from the start of the pending
+  # literal onward, and a pending literal of max_literal bytes or more is
+  # emitted, so memory stays bounded by max_literal + block_len + chunk size.
   #
   # Shaped for speed (see NOTES.md, "Code shaped by performance"):
   #
@@ -31,11 +39,14 @@ defmodule Rexd.Delta.Search do
 
   defmodule Context do
     @moduledoc false
-    # last_full is the final position where a full window fits (negative when
-    # none does); mult and adj are the RabinKarp constants for block_len.
+    # buffer holds the input not yet fully processed; size is its byte size.
+    # last_full is the final buffer position where a full window fits
+    # (negative when none does); final? is true once the input has ended.
+    # mult and adj are the RabinKarp constants for block_len.
     @enforce_keys [
-      :new,
+      :buffer,
       :size,
+      :final?,
       :block_len,
       :strong_sum_len,
       :index,
@@ -50,46 +61,115 @@ defmodule Rexd.Delta.Search do
 
   defmodule Output do
     @moduledoc false
-    # commands are accumulated in reverse; literal_start is the offset in `new`
+    # commands are accumulated in reverse; literal_start is the buffer offset
     # of the first byte not yet covered by a command; next_block is the block
     # that would extend the most recent copy.
     defstruct commands: [], literal_start: 0, next_block: nil, weak_hits: 0, false_weak_hits: 0
   end
 
-  @spec run(Signature.t(), binary()) :: {[Delta.command()], Delta.stats()}
-  def run(%Signature{} = sig, new) when is_binary(new) do
-    ctx = context(Signature.build_index(sig), new)
-    out = search(ctx)
+  # pos and weak record where the search suspended (see above).
+  @enforce_keys [:ctx, :max_literal, :out]
+  defstruct [:ctx, :max_literal, :out, pos: 0, weak: nil]
 
-    {Enum.reverse(out.commands),
-     %{weak_hits: out.weak_hits, false_weak_hits: out.false_weak_hits}}
-  end
+  @type t :: %__MODULE__{}
 
-  defp context(%Signature{} = sig, new) do
-    size = byte_size(new)
+  @doc false
+  @spec new(Signature.t(), pos_integer() | :infinity) :: t()
+  def new(%Signature{} = sig, max_literal) do
+    %Signature{index: index} = sig = Signature.build_index(sig)
     {mult, adj} = RabinKarp.window(sig.block_len)
 
-    %Context{
-      new: new,
-      size: size,
+    ctx = %Context{
+      buffer: <<>>,
+      size: 0,
+      final?: false,
       block_len: sig.block_len,
       strong_sum_len: sig.strong_sum_len,
-      index: sig.index,
+      index: index,
       blocks: List.to_tuple(sig.blocks),
       block_count: length(sig.blocks),
-      last_full: size - sig.block_len,
+      last_full: -sig.block_len,
       mult: mult,
       adj: adj
     }
+
+    %__MODULE__{ctx: ctx, max_literal: max_literal, out: %Output{}}
   end
 
-  defp search(%Context{size: 0} = ctx), do: finish(%Output{}, ctx)
-  defp search(%Context{block_count: 0} = ctx), do: finish(%Output{}, ctx)
+  @doc false
+  # Appends `chunk` and searches as far as the buffered input allows. Returns
+  # the commands that can no longer change, in order.
+  @spec feed(t(), binary()) :: {[Delta.command()], t()}
+  def feed(%__MODULE__{} = search, chunk) when is_binary(chunk) do
+    search = append(search, chunk)
+    {:suspended, pos, weak, out} = resume(search, search.ctx)
 
-  defp search(%Context{last_full: last_full} = ctx) when last_full >= 0,
-    do: scan(0, weak_at(ctx, 0, ctx.block_len), ctx, %Output{})
+    out = cap_literal(out, search.ctx, pos, search.max_literal)
+    {ready, out} = take_ready(out, pos)
+    {ready, %{search | pos: pos, weak: weak, out: out}}
+  end
 
-  defp search(ctx), do: tail(0, weak_at(ctx, 0, ctx.size), ctx, %Output{})
+  @doc false
+  # Ends the input. Returns the remaining commands and the search counters.
+  @spec finish(t()) :: {[Delta.command()], Delta.stats()}
+  def finish(%__MODULE__{ctx: ctx} = search) do
+    {:done, out} = resume(search, %{ctx | final?: true})
+    {Enum.reverse(out.commands), stats(out)}
+  end
+
+  @doc false
+  @spec run(Signature.t(), binary()) :: {[Delta.command()], Delta.stats()}
+  def run(%Signature{} = sig, new) when is_binary(new) do
+    {ready, search} = sig |> new(:infinity) |> feed(new)
+    {rest, stats} = finish(search)
+    {ready ++ rest, stats}
+  end
+
+  defp stats(%Output{weak_hits: hits, false_weak_hits: false_hits}),
+    do: %{weak_hits: hits, false_weak_hits: false_hits}
+
+  # -- buffering ---------------------------------------------------------------
+
+  defp append(%__MODULE__{ctx: ctx, pos: pos, out: out} = search, chunk) do
+    {buffer, dropped} = rebuffer(ctx, out.literal_start, chunk)
+    size = byte_size(buffer)
+    ctx = %{ctx | buffer: buffer, size: size, last_full: size - ctx.block_len}
+    out = %{out | literal_start: out.literal_start - dropped}
+    %{search | ctx: ctx, pos: pos - dropped, out: out}
+  end
+
+  # Bytes before literal_start are covered by emitted commands and can be
+  # dropped. Dropping copies the rest, so it only happens once at least half
+  # of the buffer is droppable; the total copying stays linear in the input.
+  defp rebuffer(%Context{size: 0}, _droppable, chunk), do: {chunk, 0}
+
+  defp rebuffer(%Context{buffer: buffer, size: size}, droppable, chunk)
+       when droppable > 0 and droppable * 2 >= size,
+       do: {binary_part(buffer, droppable, size - droppable) <> chunk, droppable}
+
+  defp rebuffer(%Context{buffer: buffer}, _droppable, chunk), do: {buffer <> chunk, 0}
+
+  defp resume(%__MODULE__{pos: pos, weak: nil, out: out}, ctx), do: start_window(pos, ctx, out)
+  defp resume(%__MODULE__{pos: pos, weak: weak, out: out}, ctx), do: advance(pos, weak, ctx, out)
+
+  defp cap_literal(out, _ctx, _pos, :infinity), do: out
+
+  defp cap_literal(%Output{literal_start: start} = out, ctx, pos, max_literal)
+       when pos - start >= max_literal,
+       do: flush_literal(out, ctx, pos)
+
+  defp cap_literal(out, _ctx, _pos, _max_literal), do: out
+
+  # A copy ending exactly at the current position may still be extended by
+  # the next match, so it is held back.
+  defp take_ready(
+         %Output{commands: [{:copy, _, _} = copy | rest], literal_start: pos} = out,
+         pos
+       ),
+       do: {Enum.reverse(rest), %{out | commands: [copy]}}
+
+  defp take_ready(%Output{commands: commands} = out, _pos),
+    do: {Enum.reverse(commands), %{out | commands: []}}
 
   # -- phase 1: full windows ------------------------------------------------------
 
@@ -107,7 +187,7 @@ defmodule Rexd.Delta.Search do
     case confirm(strong, weak, candidates, ctx, out.next_block) do
       {:match, block} = result ->
         out = out |> record(result) |> emit_copy(ctx, pos, block, ctx.block_len)
-        after_match(pos + ctx.block_len, ctx, out)
+        start_window(pos + ctx.block_len, ctx, out)
 
       :false_hit ->
         advance(pos, weak, ctx, record(out, :false_hit))
@@ -116,31 +196,41 @@ defmodule Rexd.Delta.Search do
 
   # Per-byte hot path: one destructuring match instead of five ctx.field lookups.
   defp advance(pos, weak, %Context{last_full: last_full} = ctx, out) when pos < last_full do
-    %Context{new: new, block_len: block_len, mult: mult, adj: adj} = ctx
-
-    weak =
-      RabinKarp.rotate(weak, :binary.at(new, pos), :binary.at(new, pos + block_len), mult, adj)
-
-    scan(pos + 1, weak, ctx, out)
+    %Context{buffer: buffer, block_len: block_len, mult: mult, adj: adj} = ctx
+    out_byte = :binary.at(buffer, pos)
+    in_byte = :binary.at(buffer, pos + block_len)
+    scan(pos + 1, RabinKarp.rotate(weak, out_byte, in_byte, mult, adj), ctx, out)
   end
 
+  defp advance(pos, weak, %Context{final?: false}, out), do: {:suspended, pos, weak, out}
   defp advance(pos, weak, ctx, out), do: tail(pos + 1, drop_first(weak, ctx, pos), ctx, out)
 
-  defp after_match(pos, %Context{last_full: last_full} = ctx, out) when pos <= last_full,
+  # Starts a fresh window at `pos`, after a match or where a previous feed
+  # stopped before one could be started. Without basis blocks every byte is
+  # literal, so the search skips straight to the end of the buffer.
+  defp start_window(pos, %Context{block_count: 0, final?: false, size: size}, out),
+    do: {:suspended, max(pos, size), nil, out}
+
+  defp start_window(_pos, %Context{block_count: 0} = ctx, out), do: finish_output(out, ctx)
+
+  defp start_window(pos, %Context{last_full: last_full} = ctx, out) when pos <= last_full,
     do: scan(pos, weak_at(ctx, pos, ctx.block_len), ctx, out)
 
-  defp after_match(pos, ctx, out), do: tail(pos, weak_at(ctx, pos, ctx.size - pos), ctx, out)
+  defp start_window(pos, %Context{final?: false}, out), do: {:suspended, pos, nil, out}
 
-  # -- phase 2: shrinking window at the end of `new` ------------------------------
+  defp start_window(pos, ctx, out),
+    do: tail(pos, weak_at(ctx, pos, ctx.size - pos), ctx, out)
 
-  defp tail(pos, _weak, %Context{size: pos} = ctx, out), do: finish(out, ctx)
+  # -- phase 2: shrinking window at the end of the input ------------------------
+
+  defp tail(pos, _weak, %Context{size: pos} = ctx, out), do: finish_output(out, ctx)
 
   defp tail(pos, weak, ctx, out) do
     len = ctx.size - pos
 
     case classify_tail(pos, len, weak, ctx) do
       {:match, block} = result ->
-        out |> record(result) |> emit_copy(ctx, pos, block, len) |> finish(ctx)
+        out |> record(result) |> emit_copy(ctx, pos, block, len) |> finish_output(ctx)
 
       result ->
         tail(pos + 1, drop_first(weak, ctx, pos), ctx, record(out, result))
@@ -198,25 +288,25 @@ defmodule Rexd.Delta.Search do
 
   defp add_copy(commands, offset, len), do: [{:copy, offset, len} | commands]
 
-  defp finish(out, ctx), do: flush_literal(out, ctx, ctx.size)
+  defp finish_output(out, ctx), do: {:done, flush_literal(out, ctx, ctx.size)}
 
   defp flush_literal(%Output{literal_start: pos} = out, _ctx, pos), do: out
 
   defp flush_literal(%Output{literal_start: start} = out, ctx, pos) do
-    literal = {:literal, binary_part(ctx.new, start, pos - start)}
+    literal = {:literal, binary_part(ctx.buffer, start, pos - start)}
     %{out | commands: [literal | out.commands], literal_start: pos}
   end
 
   # -- checksums ---------------------------------------------------------------
 
-  defp weak_at(ctx, pos, len), do: RabinKarp.hash(binary_part(ctx.new, pos, len))
+  defp weak_at(ctx, pos, len), do: RabinKarp.hash(binary_part(ctx.buffer, pos, len))
 
   defp strong_at(ctx, pos, len),
-    do: Signature.strong(binary_part(ctx.new, pos, len), ctx.strong_sum_len)
+    do: Signature.strong(binary_part(ctx.buffer, pos, len), ctx.strong_sum_len)
 
-  # Removes new[pos] from the front of the window new[pos, size).
+  # Removes buffer[pos] from the front of the window buffer[pos, size).
   defp drop_first(weak, ctx, pos) do
     {mult, adj} = RabinKarp.window(ctx.size - pos - 1)
-    RabinKarp.rollout(weak, :binary.at(ctx.new, pos), mult, adj)
+    RabinKarp.rollout(weak, :binary.at(ctx.buffer, pos), mult, adj)
   end
 end

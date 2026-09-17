@@ -22,17 +22,23 @@ defmodule Rexd.Patch do
   @doc "Applies `delta` to `basis`. See `Rexd.patch/3` for options and errors."
   @spec apply_delta(binary(), Delta.t(), keyword()) :: {:ok, binary()} | {:error, error()}
   def apply_delta(basis, %Delta{commands: commands}, opts \\ []) when is_binary(basis) do
-    max_size =
-      opts
-      |> Keyword.validate!(max_size: :infinity)
-      |> Keyword.fetch!(:max_size)
-      |> valid_max_size!()
+    max_size = options!(opts)
 
     with {:ok, size} <- output_size(commands, byte_size(basis), 0),
          :ok <- check_size(size, max_size) do
       {:ok, commands |> Enum.map(&command_bytes(&1, basis)) |> IO.iodata_to_binary()}
     end
   end
+
+  @doc false
+  # Validates patch options, returning max_size.
+  @spec options!(keyword()) :: non_neg_integer() | :infinity
+  def options!(opts) when is_list(opts),
+    do:
+      opts
+      |> Keyword.validate!(max_size: :infinity)
+      |> Keyword.fetch!(:max_size)
+      |> valid_max_size!()
 
   defp valid_max_size!(:infinity), do: :infinity
   defp valid_max_size!(size) when is_integer(size) and size >= 0, do: size

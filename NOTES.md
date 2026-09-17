@@ -100,6 +100,32 @@ Differences, none of which affect the wire format:
 - **Literals reference the input.** Literal commands are sub-binaries of the
   new data, not copies.
 
+## Streaming
+
+`Rexd.Stream` shares its algorithms with the whole-binary functions rather
+than reimplementing them.
+
+- **Signature.** Input is grouped into whole blocks and signed with
+  `Rexd.Signature`; the output is byte-identical to
+  `Rexd.Signature.encode/1`.
+- **Delta.** The search in `Rexd.Delta.Search` is resumable: it consumes
+  input in chunks and suspends when the rolling window reaches the end of
+  the buffered data, recording the window position and its weak checksum.
+  `Rexd.delta/2` is the same search fed once. Matches are therefore
+  identical; the only difference is that a stream emits pending unmatched
+  bytes as a literal command once they reach 64 KiB at the end of an input
+  chunk, as librsync bounds literals to `MAX_DELTA_CMD`. Bytes already
+  covered by emitted commands are dropped from the buffer once they make up
+  at least half of it, which keeps both memory and copying linear.
+- **Patch.** `Rexd.Delta.next_command/1` decodes one command at a time and
+  serves both `Rexd.Delta.decode/1` and the streaming patcher. Literal data
+  is passed through as it arrives; copies are read from the basis lazily, in
+  pieces of at most 64 KiB, so a single large copy never materialises in
+  memory.
+- **Errors.** A stream cannot return an error tuple, so invalid input raises
+  `Rexd.StreamError` when the stream is consumed. Its `reason` uses the same
+  terms as the tuple-returning functions.
+
 ## Code shaped by performance
 
 A few places favour speed over the most direct form of the code. Each is

@@ -83,9 +83,20 @@ defmodule Rexd.Delta do
 
   @doc "Encodes the delta in librsync wire format. Zero-length commands are omitted."
   @spec encode(t()) :: iodata()
-  def encode(%__MODULE__{commands: commands}) do
-    [<<@magic::32>>, Enum.map(commands, &encode_command/1), <<0>>]
-  end
+  def encode(%__MODULE__{commands: commands}),
+    do: [encode_header(), encode_commands(commands), encode_end()]
+
+  @doc false
+  @spec encode_header() :: binary()
+  def encode_header, do: <<@magic::32>>
+
+  @doc false
+  @spec encode_end() :: binary()
+  def encode_end, do: <<0>>
+
+  @doc false
+  @spec encode_commands([command()]) :: iodata()
+  def encode_commands(commands), do: Enum.map(commands, &encode_command/1)
 
   defp encode_command({:literal, <<>>}), do: []
   defp encode_command({:copy, _offset, 0}), do: []
@@ -117,65 +128,88 @@ defmodule Rexd.Delta do
   def decode(<<magic::32, _::binary>>), do: {:error, {:bad_magic, magic}}
   def decode(bin) when is_binary(bin), do: {:error, :truncated_header}
 
-  # One decode_commands/2 clause per opcode, generated from the table.
+  defp decode_commands(body, acc), do: decode_step(next_command(body), acc)
+
+  defp decode_step({:ok, :end, <<>>}, acc), do: {:ok, %__MODULE__{commands: Enum.reverse(acc)}}
+  defp decode_step({:ok, :end, _rest}, _acc), do: {:error, :trailing_data}
+
+  defp decode_step({:ok, {:copy, _offset, _len} = copy, rest}, acc),
+    do: decode_commands(rest, [copy | acc])
+
+  defp decode_step({:ok, {:literal_header, len}, rest}, acc) when byte_size(rest) >= len do
+    <<data::binary-size(len), rest::binary>> = rest
+    decode_commands(rest, [{:literal, data} | acc])
+  end
+
+  defp decode_step({:ok, {:literal_header, _len}, _rest}, _acc), do: {:error, :truncated}
+  defp decode_step(:end_of_input, _acc), do: {:error, :missing_end}
+  defp decode_step(:incomplete, _acc), do: {:error, :truncated}
+  defp decode_step({:error, _reason} = error, _acc), do: error
+
+  @doc false
+  # Decodes the command at the start of `bytes`, without its literal data:
+  #
+  #   {:ok, :end, rest}
+  #   {:ok, {:copy, offset, len}, rest}
+  #   {:ok, {:literal_header, len}, rest}   - `len` bytes of data follow in rest
+  #   :end_of_input                         - `bytes` is empty
+  #   :incomplete                           - a command has started but is cut off
+  #   {:error, reason}
+  #
+  # librsync reads arguments as signed 64-bit integers and rejects zero lengths
+  # (patch.c), so such commands are reported as errors.
+  @spec next_command(binary()) ::
+          {:ok,
+           :end | {:copy, non_neg_integer(), pos_integer()} | {:literal_header, pos_integer()},
+           binary()}
+          | :end_of_input
+          | :incomplete
+          | {:error, decode_error()}
+  def next_command(bytes)
 
   for {op, :end, _imm, _w1, _w2} <- @table do
-    defp decode_commands(<<unquote(op)>>, acc),
-      do: {:ok, %__MODULE__{commands: Enum.reverse(acc)}}
-
-    defp decode_commands(<<unquote(op), _::binary>>, _acc), do: {:error, :trailing_data}
+    def next_command(<<unquote(op), rest::binary>>), do: {:ok, :end, rest}
   end
 
   for {op, :literal, imm, 0, 0} <- @table, imm > 0 do
-    defp decode_commands(<<unquote(op), data::binary-size(unquote(imm)), rest::binary>>, acc),
-      do: decode_commands(rest, [{:literal, data} | acc])
+    def next_command(<<unquote(op), rest::binary>>),
+      do: {:ok, {:literal_header, unquote(imm)}, rest}
   end
 
-  # librsync reads arguments as signed 64-bit integers and rejects zero lengths
-  # (patch.c), so such commands are corrupt on the wire.
-
   for {op, :literal, 0, w, 0} <- @table do
-    defp decode_commands(<<unquote(op), 0::size(unquote(w * 8)), _::binary>>, _acc),
+    def next_command(<<unquote(op), 0::size(unquote(w * 8)), _::binary>>),
       do: {:error, {:zero_length, :literal}}
 
-    defp decode_commands(<<unquote(op), len::size(unquote(w * 8)), _::binary>>, _acc)
-         when len > @max_argument,
-         do: {:error, {:argument_too_large, len}}
+    def next_command(<<unquote(op), len::size(unquote(w * 8)), _::binary>>)
+        when len > @max_argument,
+        do: {:error, {:argument_too_large, len}}
 
-    defp decode_commands(<<unquote(op), len::size(unquote(w * 8)), rest::binary>>, acc)
-         when byte_size(rest) >= len do
-      <<data::binary-size(len), rest::binary>> = rest
-      decode_commands(rest, [{:literal, data} | acc])
-    end
+    def next_command(<<unquote(op), len::size(unquote(w * 8)), rest::binary>>),
+      do: {:ok, {:literal_header, len}, rest}
   end
 
   for {op, :copy, 0, w1, w2} <- @table do
-    defp decode_commands(
-           <<unquote(op), _offset::size(unquote(w1 * 8)), 0::size(unquote(w2 * 8)), _::binary>>,
-           _acc
-         ),
-         do: {:error, {:zero_length, :copy}}
+    def next_command(
+          <<unquote(op), _::size(unquote(w1 * 8)), 0::size(unquote(w2 * 8)), _::binary>>
+        ),
+        do: {:error, {:zero_length, :copy}}
 
-    defp decode_commands(
-           <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)), _::binary>>,
-           _acc
-         )
-         when offset > @max_argument or len > @max_argument,
-         do: {:error, {:argument_too_large, max(offset, len)}}
+    def next_command(
+          <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)), _::binary>>
+        )
+        when offset > @max_argument or len > @max_argument,
+        do: {:error, {:argument_too_large, max(offset, len)}}
 
-    defp decode_commands(
-           <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)),
-             rest::binary>>,
-           acc
-         ),
-         do: decode_commands(rest, [{:copy, offset, len} | acc])
+    def next_command(
+          <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)), rest::binary>>
+        ),
+        do: {:ok, {:copy, offset, len}, rest}
   end
 
   for {op, :reserved, _imm, _w1, _w2} <- @table do
-    defp decode_commands(<<unquote(op), _::binary>>, _acc),
-      do: {:error, {:reserved_opcode, unquote(op)}}
+    def next_command(<<unquote(op), _::binary>>), do: {:error, {:reserved_opcode, unquote(op)}}
   end
 
-  defp decode_commands(<<>>, _acc), do: {:error, :missing_end}
-  defp decode_commands(_truncated_command, _acc), do: {:error, :truncated}
+  def next_command(<<>>), do: :end_of_input
+  def next_command(_cut_off), do: :incomplete
 end

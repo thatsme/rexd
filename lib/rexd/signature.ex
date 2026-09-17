@@ -71,15 +71,21 @@ defmodule Rexd.Signature do
   """
   @spec compute(binary(), keyword()) :: t()
   def compute(basis, opts \\ []) when is_binary(basis) and is_list(opts) do
-    opts = Keyword.validate!(opts, block_len: @default_block_len, strong_sum_len: 32)
-    block_len = valid_block_len!(opts[:block_len])
-    strong_sum_len = valid_strong_sum_len!(opts[:strong_sum_len])
+    {block_len, strong_sum_len} = options!(opts)
 
     %__MODULE__{
       block_len: block_len,
       strong_sum_len: strong_sum_len,
       blocks: compute_blocks(block_len, strong_sum_len, basis, [])
     }
+  end
+
+  @doc false
+  # Validates signature options, returning {block_len, strong_sum_len}.
+  @spec options!(keyword()) :: {pos_integer(), 1..32}
+  def options!(opts) when is_list(opts) do
+    opts = Keyword.validate!(opts, block_len: @default_block_len, strong_sum_len: 32)
+    {valid_block_len!(opts[:block_len]), valid_strong_sum_len!(opts[:strong_sum_len])}
   end
 
   defp valid_block_len!(len) when is_integer(len) and len in 1..@max_u32, do: len
@@ -121,12 +127,17 @@ defmodule Rexd.Signature do
 
   @doc "Encodes the signature in librsync wire format."
   @spec encode(t()) :: iodata()
-  def encode(%__MODULE__{block_len: block_len, strong_sum_len: strong_sum_len, blocks: blocks}) do
-    [
-      <<@magic::32, block_len::32, strong_sum_len::32>>
-      | Enum.map(blocks, fn {weak, strong} -> <<weak::32, strong::binary>> end)
-    ]
-  end
+  def encode(%__MODULE__{} = sig), do: [encode_header(sig) | encode_blocks(sig)]
+
+  @doc false
+  @spec encode_header(t()) :: binary()
+  def encode_header(%__MODULE__{block_len: block_len, strong_sum_len: strong_sum_len}),
+    do: <<@magic::32, block_len::32, strong_sum_len::32>>
+
+  @doc false
+  @spec encode_blocks(t()) :: [binary()]
+  def encode_blocks(%__MODULE__{blocks: blocks}),
+    do: Enum.map(blocks, fn {weak, strong} -> <<weak::32, strong::binary>> end)
 
   @doc """
   Decodes a librsync signature.
