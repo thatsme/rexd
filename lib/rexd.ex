@@ -72,10 +72,11 @@ defmodule Rexd do
   def recommended_block_len(size) when is_integer(size) and size > 65_536,
     do: isqrt(size) &&& bnot(127)
 
+  # Newton's method from above; stops when the estimate no longer decreases.
   defp isqrt(n), do: isqrt(n, n)
 
-  defp isqrt(n, x) do
-    y = div(x + div(n, x), 2)
-    if y >= x, do: x, else: isqrt(n, y)
-  end
+  defp isqrt(n, x), do: isqrt(n, x, div(x + div(n, x), 2))
+
+  defp isqrt(_n, x, next) when next >= x, do: x
+  defp isqrt(n, _x, next), do: isqrt(n, next)
 end

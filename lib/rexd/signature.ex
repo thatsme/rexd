@@ -72,38 +72,45 @@ defmodule Rexd.Signature do
   @spec compute(binary(), keyword()) :: t()
   def compute(basis, opts \\ []) when is_binary(basis) and is_list(opts) do
     opts = Keyword.validate!(opts, block_len: @default_block_len, strong_sum_len: 32)
-    block_len = opts[:block_len]
-    strong_sum_len = opts[:strong_sum_len]
-
-    unless is_integer(block_len) and block_len in 1..@max_u32 do
-      raise ArgumentError,
-            "block_len must be an integer in 1..#{@max_u32}, got: #{inspect(block_len)}"
-    end
-
-    unless is_integer(strong_sum_len) and strong_sum_len in 1..@max_strong_sum_len do
-      raise ArgumentError,
-            "strong_sum_len must be an integer in 1..#{@max_strong_sum_len}, got: #{inspect(strong_sum_len)}"
-    end
+    block_len = valid_block_len!(opts[:block_len])
+    strong_sum_len = valid_strong_sum_len!(opts[:strong_sum_len])
 
     %__MODULE__{
       block_len: block_len,
       strong_sum_len: strong_sum_len,
-      blocks: compute_blocks(basis, block_len, strong_sum_len, [])
+      blocks: compute_blocks(block_len, strong_sum_len, basis, [])
     }
   end
 
-  defp compute_blocks(<<>>, _block_len, _strong_sum_len, acc), do: Enum.reverse(acc)
+  defp valid_block_len!(len) when is_integer(len) and len in 1..@max_u32, do: len
 
-  defp compute_blocks(basis, block_len, strong_sum_len, acc) do
-    {block, rest} =
-      case basis do
-        <<block::binary-size(block_len), rest::binary>> -> {block, rest}
-        short -> {short, <<>>}
-      end
+  defp valid_block_len!(other),
+    do:
+      raise(
+        ArgumentError,
+        "block_len must be an integer in 1..#{@max_u32}, got: #{inspect(other)}"
+      )
 
-    entry = {RabinKarp.hash(block), strong(block, strong_sum_len)}
-    compute_blocks(rest, block_len, strong_sum_len, [entry | acc])
+  defp valid_strong_sum_len!(len) when is_integer(len) and len in 1..@max_strong_sum_len, do: len
+
+  defp valid_strong_sum_len!(other) do
+    raise ArgumentError,
+          "strong_sum_len must be an integer in 1..#{@max_strong_sum_len}, got: #{inspect(other)}"
   end
+
+  defp compute_blocks(_block_len, _strong_sum_len, <<>>, acc), do: Enum.reverse(acc)
+
+  defp compute_blocks(block_len, strong_sum_len, basis, acc) when byte_size(basis) >= block_len do
+    <<block::binary-size(block_len), rest::binary>> = basis
+    compute_blocks(block_len, strong_sum_len, rest, [block_entry(block, strong_sum_len) | acc])
+  end
+
+  # Shorter than block_len: the final block.
+  defp compute_blocks(_block_len, strong_sum_len, last, acc),
+    do: Enum.reverse([block_entry(last, strong_sum_len) | acc])
+
+  defp block_entry(block, strong_sum_len),
+    do: {RabinKarp.hash(block), strong(block, strong_sum_len)}
 
   @doc "The strong hash of `data` truncated to `strong_sum_len` bytes."
   @spec strong(binary(), 1..32) :: binary()
@@ -128,33 +135,28 @@ defmodule Rexd.Signature do
   variants return `{:error, {:unsupported_magic, kind}}`.
   """
   @spec decode(binary()) :: {:ok, t()} | {:error, decode_error()}
-  def decode(<<@magic::32, block_len::32, strong_sum_len::32, body::binary>>) do
-    entry_len = 4 + strong_sum_len
+  def decode(<<@magic::32, 0::32, _strong_sum_len::32, _::binary>>),
+    do: {:error, {:invalid_block_len, 0}}
 
-    cond do
-      block_len == 0 ->
-        {:error, {:invalid_block_len, block_len}}
+  def decode(<<@magic::32, _block_len::32, strong_sum_len::32, _::binary>>)
+      when strong_sum_len not in 1..@max_strong_sum_len,
+      do: {:error, {:invalid_strong_sum_len, strong_sum_len}}
 
-      strong_sum_len not in 1..@max_strong_sum_len ->
-        {:error, {:invalid_strong_sum_len, strong_sum_len}}
-
-      rem(byte_size(body), entry_len) != 0 ->
-        {:error, :truncated}
-
-      true ->
-        blocks = for <<weak::32, strong::binary-size(strong_sum_len) <- body>>, do: {weak, strong}
-        {:ok, %__MODULE__{block_len: block_len, strong_sum_len: strong_sum_len, blocks: blocks}}
-    end
+  def decode(<<@magic::32, block_len::32, strong_sum_len::32, body::binary>>)
+      when rem(byte_size(body), 4 + strong_sum_len) == 0 do
+    blocks = for <<weak::32, strong::binary-size(strong_sum_len) <- body>>, do: {weak, strong}
+    {:ok, %__MODULE__{block_len: block_len, strong_sum_len: strong_sum_len, blocks: blocks}}
   end
+
+  def decode(<<@magic::32, _block_len::32, _strong_sum_len::32, _::binary>>),
+    do: {:error, :truncated}
 
   def decode(<<@magic::32, _::binary>>), do: {:error, :truncated_header}
 
-  def decode(<<magic::32, _::binary>>) do
-    case Map.fetch(@unsupported_magics, magic) do
-      {:ok, kind} -> {:error, {:unsupported_magic, kind}}
-      :error -> {:error, {:bad_magic, magic}}
-    end
-  end
+  def decode(<<magic::32, _::binary>>) when is_map_key(@unsupported_magics, magic),
+    do: {:error, {:unsupported_magic, Map.fetch!(@unsupported_magics, magic)}}
+
+  def decode(<<magic::32, _::binary>>), do: {:error, {:bad_magic, magic}}
 
   def decode(bin) when is_binary(bin), do: {:error, :truncated_header}
 
@@ -182,8 +184,9 @@ defmodule Rexd.Signature do
   # Candidates are accumulated newest-first; a strong hash already present
   # belongs to a lower-numbered block and wins.
   defp add_candidate(candidates, block_no, strong) do
-    if List.keymember?(candidates, strong, 1),
-      do: candidates,
-      else: [{block_no, strong} | candidates]
+    case List.keyfind(candidates, strong, 1) do
+      nil -> [{block_no, strong} | candidates]
+      _lower_block -> candidates
+    end
   end
 end

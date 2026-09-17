@@ -151,34 +151,31 @@ defmodule Rexd.Delta.Search do
     last_block = ctx.block_count - 1
 
     case elem(ctx.blocks, last_block) do
-      {^weak, strong} ->
-        if strong_at(ctx, pos, len) == strong, do: {:match, last_block}, else: :false_hit
-
-      _ ->
-        :miss
+      {^weak, block_strong} -> compare_strong(strong_at(ctx, pos, len), block_strong, last_block)
+      _ -> :miss
     end
   end
+
+  defp compare_strong(strong, strong, block), do: {:match, block}
+  defp compare_strong(_window_strong, _block_strong, _block), do: :false_hit
 
   # -- matching ----------------------------------------------------------------
 
   # Prefer the block that extends the previous copy, so runs of identical
   # blocks (stored once in the index) coalesce into a single command.
   defp confirm(strong, weak, candidates, ctx, next_block) do
-    cond do
-      continues_copy?(ctx, next_block, weak, strong) -> {:match, next_block}
-      found = List.keyfind(candidates, strong, 1) -> {:match, elem(found, 0)}
-      true -> :false_hit
+    case next_block_checksums(ctx, next_block) do
+      {^weak, ^strong} -> {:match, next_block}
+      _ -> candidate_match(List.keyfind(candidates, strong, 1))
     end
   end
 
-  defp continues_copy?(_ctx, nil, _weak, _strong), do: false
+  defp next_block_checksums(_ctx, nil), do: nil
+  defp next_block_checksums(%Context{block_count: count}, next) when next >= count, do: nil
+  defp next_block_checksums(%Context{blocks: blocks}, next), do: elem(blocks, next)
 
-  defp continues_copy?(%Context{block_count: count}, next_block, _weak, _strong)
-       when next_block >= count,
-       do: false
-
-  defp continues_copy?(ctx, next_block, weak, strong),
-    do: elem(ctx.blocks, next_block) == {weak, strong}
+  defp candidate_match({block, _strong}), do: {:match, block}
+  defp candidate_match(nil), do: :false_hit
 
   # -- output ------------------------------------------------------------------
 
@@ -190,19 +187,16 @@ defmodule Rexd.Delta.Search do
 
   defp emit_copy(out, ctx, pos, block, len) do
     out = flush_literal(out, ctx, pos)
-    offset = block * ctx.block_len
-
-    commands =
-      case out.commands do
-        [{:copy, prev_offset, prev_len} | rest] when prev_offset + prev_len == offset ->
-          [{:copy, prev_offset, prev_len + len} | rest]
-
-        commands ->
-          [{:copy, offset, len} | commands]
-      end
-
+    commands = add_copy(out.commands, block * ctx.block_len, len)
     %{out | commands: commands, literal_start: pos + len, next_block: block + 1}
   end
+
+  # Commands are in reverse order: the head is the most recent command.
+  defp add_copy([{:copy, prev_offset, prev_len} | rest], offset, len)
+       when prev_offset + prev_len == offset,
+       do: [{:copy, prev_offset, prev_len + len} | rest]
+
+  defp add_copy(commands, offset, len), do: [{:copy, offset, len} | commands]
 
   defp finish(out, ctx), do: flush_literal(out, ctx, ctx.size)
 

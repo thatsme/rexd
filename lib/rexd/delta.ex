@@ -81,15 +81,13 @@ defmodule Rexd.Delta do
   defp encode_command({:literal, <<>>}), do: []
   defp encode_command({:copy, _offset, 0}), do: []
 
+  defp encode_command({:literal, data}) when byte_size(data) <= @max_immediate,
+    do: [Map.fetch!(@literal_immediate, byte_size(data)), data]
+
   defp encode_command({:literal, data}) do
     len = byte_size(data)
-
-    if len <= @max_immediate do
-      [Map.fetch!(@literal_immediate, len), data]
-    else
-      w = int_width(len)
-      [<<Map.fetch!(@literal_by_width, w), len::size(w * 8)>>, data]
-    end
+    w = int_width(len)
+    [<<Map.fetch!(@literal_by_width, w), len::size(w * 8)>>, data]
   end
 
   defp encode_command({:copy, offset, len}) do
@@ -110,37 +108,40 @@ defmodule Rexd.Delta do
   def decode(<<magic::32, _::binary>>), do: {:error, {:bad_magic, magic}}
   def decode(bin) when is_binary(bin), do: {:error, :truncated_header}
 
-  for {op, kind, imm, w1, w2} <- @table do
-    case kind do
-      :end ->
-        defp decode_commands(<<unquote(op)>>, acc),
-          do: {:ok, %__MODULE__{commands: Enum.reverse(acc)}}
+  # One decode_commands/2 clause per opcode, generated from the table.
 
-        defp decode_commands(<<unquote(op), _::binary>>, _acc), do: {:error, :trailing_data}
+  for {op, :end, _imm, _w1, _w2} <- @table do
+    defp decode_commands(<<unquote(op)>>, acc),
+      do: {:ok, %__MODULE__{commands: Enum.reverse(acc)}}
 
-      :literal when imm > 0 ->
-        defp decode_commands(<<unquote(op), data::binary-size(unquote(imm)), rest::binary>>, acc),
-          do: decode_commands(rest, [{:literal, data} | acc])
+    defp decode_commands(<<unquote(op), _::binary>>, _acc), do: {:error, :trailing_data}
+  end
 
-      :literal ->
-        defp decode_commands(<<unquote(op), len::size(unquote(w1 * 8)), rest::binary>>, acc)
-             when byte_size(rest) >= len do
-          <<data::binary-size(len), rest::binary>> = rest
-          decode_commands(rest, [{:literal, data} | acc])
-        end
+  for {op, :literal, imm, 0, 0} <- @table, imm > 0 do
+    defp decode_commands(<<unquote(op), data::binary-size(unquote(imm)), rest::binary>>, acc),
+      do: decode_commands(rest, [{:literal, data} | acc])
+  end
 
-      :copy ->
-        defp decode_commands(
-               <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)),
-                 rest::binary>>,
-               acc
-             ),
-             do: decode_commands(rest, [{:copy, offset, len} | acc])
-
-      :reserved ->
-        defp decode_commands(<<unquote(op), _::binary>>, _acc),
-          do: {:error, {:reserved_opcode, unquote(op)}}
+  for {op, :literal, 0, w, 0} <- @table do
+    defp decode_commands(<<unquote(op), len::size(unquote(w * 8)), rest::binary>>, acc)
+         when byte_size(rest) >= len do
+      <<data::binary-size(len), rest::binary>> = rest
+      decode_commands(rest, [{:literal, data} | acc])
     end
+  end
+
+  for {op, :copy, 0, w1, w2} <- @table do
+    defp decode_commands(
+           <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)),
+             rest::binary>>,
+           acc
+         ),
+         do: decode_commands(rest, [{:copy, offset, len} | acc])
+  end
+
+  for {op, :reserved, _imm, _w1, _w2} <- @table do
+    defp decode_commands(<<unquote(op), _::binary>>, _acc),
+      do: {:error, {:reserved_opcode, unquote(op)}}
   end
 
   defp decode_commands(<<>>, _acc), do: {:error, :missing_end}

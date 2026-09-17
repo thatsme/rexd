@@ -127,31 +127,29 @@ defmodule Rexd.Blake2b do
   end
 
   # x = rotr64(x ^ y, n) for n in {16, 24, 32, 63}
-  xor_rotr = fn {xh, xl}, {yh, yl}, n ->
-    case n do
-      32 ->
-        quote do
-          th = bxor(unquote(xh), unquote(yh))
-          unquote(xh) = bxor(unquote(xl), unquote(yl))
-          unquote(xl) = th
-        end
+  xor_rotr = fn
+    {xh, xl}, {yh, yl}, 32 ->
+      quote do
+        th = bxor(unquote(xh), unquote(yh))
+        unquote(xh) = bxor(unquote(xl), unquote(yl))
+        unquote(xl) = th
+      end
 
-      63 ->
-        quote do
-          th = bxor(unquote(xh), unquote(yh))
-          tl = bxor(unquote(xl), unquote(yl))
-          unquote(xh) = (th <<< 1 ||| tl >>> 31) &&& @m32
-          unquote(xl) = (tl <<< 1 ||| th >>> 31) &&& @m32
-        end
+    {xh, xl}, {yh, yl}, 63 ->
+      quote do
+        th = bxor(unquote(xh), unquote(yh))
+        tl = bxor(unquote(xl), unquote(yl))
+        unquote(xh) = (th <<< 1 ||| tl >>> 31) &&& @m32
+        unquote(xl) = (tl <<< 1 ||| th >>> 31) &&& @m32
+      end
 
-      n when n < 32 ->
-        quote do
-          th = bxor(unquote(xh), unquote(yh))
-          tl = bxor(unquote(xl), unquote(yl))
-          unquote(xh) = (th >>> unquote(n) ||| tl <<< unquote(32 - n)) &&& @m32
-          unquote(xl) = (tl >>> unquote(n) ||| th <<< unquote(32 - n)) &&& @m32
-        end
-    end
+    {xh, xl}, {yh, yl}, n when n < 32 ->
+      quote do
+        th = bxor(unquote(xh), unquote(yh))
+        tl = bxor(unquote(xl), unquote(yl))
+        unquote(xh) = (th >>> unquote(n) ||| tl <<< unquote(32 - n)) &&& @m32
+        unquote(xl) = (tl >>> unquote(n) ||| th <<< unquote(32 - n)) &&& @m32
+      end
   end
 
   # The G mixing function (RFC 7693 §3.1).
@@ -193,31 +191,31 @@ defmodule Rexd.Blake2b do
 
   # v[0..7] = h, v[8..15] = IV; v12 ^= t (low 64 bits), v14 ^= f.
   # Inputs never reach 2^64 bytes, so the high counter word v13 is unchanged.
+  initial_value = fn
+    i when i < 8 ->
+      Enum.at(h_vars, i)
+
+    i ->
+      iv = Enum.at(@iv, i - 8)
+      {iv >>> 32, iv &&& @m32}
+  end
+
+  mix_in_counter_and_flag = fn
+    12, {rh, rl} ->
+      {quote(do: bxor(unquote(rh), unquote(t_var) >>> 32 &&& @m32)),
+       quote(do: bxor(unquote(rl), unquote(t_var) &&& @m32))}
+
+    14, {rh, rl} ->
+      {quote(do: bxor(unquote(rh), unquote(f_var))), quote(do: bxor(unquote(rl), unquote(f_var)))}
+
+    _i, value ->
+      value
+  end
+
   init =
     for i <- 0..15 do
       {vh, vl} = Enum.at(v_vars, i)
-
-      {rh, rl} =
-        if i < 8 do
-          Enum.at(h_vars, i)
-        else
-          iv = Enum.at(@iv, i - 8)
-          {iv >>> 32, iv &&& @m32}
-        end
-
-      {rh, rl} =
-        case i do
-          12 ->
-            {quote(do: bxor(unquote(rh), unquote(t_var) >>> 32 &&& @m32)),
-             quote(do: bxor(unquote(rl), unquote(t_var) &&& @m32))}
-
-          14 ->
-            {quote(do: bxor(unquote(rh), unquote(f_var))),
-             quote(do: bxor(unquote(rl), unquote(f_var)))}
-
-          _ ->
-            {rh, rl}
-        end
+      {rh, rl} = mix_in_counter_and_flag.(i, initial_value.(i))
 
       quote do
         unquote(vh) = unquote(rh)

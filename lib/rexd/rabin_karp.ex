@@ -89,10 +89,11 @@ defmodule Rexd.RabinKarp do
   @spec pow(non_neg_integer()) :: 0..0xFFFFFFFF
   def pow(n) when is_integer(n) and n >= 0, do: pow(@mult, n, 1)
 
+  # Square-and-multiply over the bits of n.
   defp pow(_base, 0, acc), do: acc
 
-  defp pow(base, n, acc) do
-    acc = if (n &&& 1) == 1, do: acc * base &&& @mask, else: acc
-    pow(base * base &&& @mask, n >>> 1, acc)
-  end
+  defp pow(base, n, acc) when (n &&& 1) == 1,
+    do: pow(base * base &&& @mask, n >>> 1, acc * base &&& @mask)
+
+  defp pow(base, n, acc), do: pow(base * base &&& @mask, n >>> 1, acc)
 end
