@@ -20,4 +20,7 @@ data = :crypto.strong_rand_bytes(mb * 1024 * 1024)
 n = 2048
 {us, h} = :timer.tc(fn -> Bench.Rolling.run(data, n) end)
 ^h = Rexd.RabinKarp.hash(binary_part(data, byte_size(data) - n, n))
-IO.puts("RabinKarp.rotate/5 over #{mb} MB, window #{n}: #{Float.round(mb / (us / 1.0e6), 1)} MB/s")
+
+IO.puts(
+  "RabinKarp.rotate/5 over #{mb} MB, window #{n}: #{Float.round(mb / (us / 1.0e6), 1)} MB/s"
+)

@@ -42,7 +42,7 @@ defmodule Rexd.SignatureTest do
     end
 
     property "deterministic encoding" do
-      check all(basis <- binary(), block_len <- integer(1..64)) do
+      check all basis <- binary(), block_len <- integer(1..64) do
         a = IO.iodata_to_binary(Signature.encode(Rexd.signature(basis, block_len: block_len)))
         b = IO.iodata_to_binary(Signature.encode(Rexd.signature(basis, block_len: block_len)))
         assert a == b
@@ -52,11 +52,9 @@ defmodule Rexd.SignatureTest do
 
   describe "encode/decode" do
     property "round-trip" do
-      check all(
-              basis <- binary(max_length: 500),
-              block_len <- integer(1..64),
-              strong_sum_len <- integer(1..32)
-            ) do
+      check all basis <- binary(max_length: 500),
+                block_len <- integer(1..64),
+                strong_sum_len <- integer(1..32) do
         sig = Rexd.signature(basis, block_len: block_len, strong_sum_len: strong_sum_len)
 
         assert {:ok, ^sig} =
@@ -120,12 +118,10 @@ defmodule Rexd.SignatureTest do
     @describetag :tmp_dir
 
     property "our signature equals rdiff signature (3a) and rdiff's decodes (3d)", %{tmp_dir: dir} do
-      check all(
-              basis <- binary(max_length: 5000),
-              block_len <- member_of([1, 2, 3, 16, 64, 100, 128, 256, 1000, 2048]),
-              strong_sum_len <- member_of([1, 8, 16, 31, 32]),
-              max_runs: 60
-            ) do
+      check all basis <- binary(max_length: 5000),
+                block_len <- member_of([1, 2, 3, 16, 64, 100, 128, 256, 1000, 2048]),
+                strong_sum_len <- member_of([1, 8, 16, 31, 32]),
+                max_runs: 60 do
         theirs = Oracle.rdiff_signature(basis, block_len, strong_sum_len, dir)
         ours = Rexd.signature(basis, block_len: block_len, strong_sum_len: strong_sum_len)
         assert IO.iodata_to_binary(Signature.encode(ours)) == theirs

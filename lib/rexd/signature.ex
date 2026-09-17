@@ -168,21 +168,22 @@ defmodule Rexd.Signature do
   def build_index(%__MODULE__{index: index} = sig) when is_map(index), do: sig
 
   def build_index(%__MODULE__{blocks: blocks} = sig) do
-    reversed =
+    index =
       blocks
       |> Enum.with_index()
       |> Enum.reduce(%{}, fn {{weak, strong}, block_no}, acc ->
-        case acc do
-          %{^weak => entries} ->
-            if List.keymember?(entries, strong, 1),
-              do: acc,
-              else: %{acc | weak => [{block_no, strong} | entries]}
-
-          _ ->
-            Map.put(acc, weak, [{block_no, strong}])
-        end
+        Map.update(acc, weak, [{block_no, strong}], &add_candidate(&1, block_no, strong))
       end)
+      |> Map.new(fn {weak, candidates} -> {weak, Enum.reverse(candidates)} end)
 
-    %{sig | index: Map.new(reversed, fn {weak, entries} -> {weak, Enum.reverse(entries)} end)}
+    %{sig | index: index}
+  end
+
+  # Candidates are accumulated newest-first; a strong hash already present
+  # belongs to a lower-numbered block and wins.
+  defp add_candidate(candidates, block_no, strong) do
+    if List.keymember?(candidates, strong, 1),
+      do: candidates,
+      else: [{block_no, strong} | candidates]
   end
 end

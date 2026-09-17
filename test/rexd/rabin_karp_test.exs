@@ -15,13 +15,13 @@ defmodule Rexd.RabinKarpTest do
     end
 
     test "update/2 is incremental" do
-      check all(a <- binary(), b <- binary()) do
+      check all a <- binary(), b <- binary() do
         assert RabinKarp.update(RabinKarp.hash(a), b) == RabinKarp.hash(a <> b)
       end
     end
 
     test "rollin/2 matches update/2 byte by byte" do
-      check all(data <- binary()) do
+      check all data <- binary() do
         rolled = for <<b <- data>>, reduce: RabinKarp.seed(), do: (h -> RabinKarp.rollin(h, b))
         assert rolled == RabinKarp.hash(data)
       end
@@ -44,10 +44,8 @@ defmodule Rexd.RabinKarpTest do
 
   describe "rotate/5" do
     property "rolling equals from-scratch at every offset" do
-      check all(
-              n <- integer(1..64),
-              data <- binary(min_length: n, max_length: n + 200)
-            ) do
+      check all n <- integer(1..64),
+                data <- binary(min_length: n, max_length: n + 200) do
         {mult_n, adj_n} = RabinKarp.window(n)
         last = byte_size(data) - n
         h0 = RabinKarp.hash(binary_part(data, 0, n))
@@ -77,7 +75,7 @@ defmodule Rexd.RabinKarpTest do
 
   describe "rollout/4" do
     property "shrinking the window equals hashing the suffix" do
-      check all(data <- binary(min_length: 1, max_length: 300)) do
+      check all data <- binary(min_length: 1, max_length: 300) do
         n = byte_size(data)
 
         Enum.reduce(0..(n - 1), RabinKarp.hash(data), fn pos, h ->

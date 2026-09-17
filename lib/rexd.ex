@@ -19,7 +19,7 @@ defmodule Rexd do
 
   import Bitwise
 
-  alias Rexd.Signature
+  alias Rexd.{Delta, Signature}
 
   @doc """
   Computes the signature of `basis`.
@@ -35,6 +35,26 @@ defmodule Rexd do
   """
   @spec signature(binary(), keyword()) :: Signature.t()
   defdelegate signature(basis, opts \\ []), to: Signature, as: :compute
+
+  @doc """
+  Computes the delta that turns the basis described by `signature` into `new`.
+
+  The signature's weak-checksum index is built on entry when absent; call
+  `Rexd.Signature.build_index/1` once to reuse it across several deltas.
+  """
+  @spec delta(Signature.t(), binary()) :: Delta.t()
+  defdelegate delta(signature, new), to: Delta, as: :compute
+
+  @doc """
+  Rebuilds the new binary by applying `delta` to `basis`.
+
+  Returns `{:error, {:copy_out_of_range, offset, length}}` when a copy
+  command reaches past the end of `basis`, which happens when the delta was
+  computed against a different basis.
+  """
+  @spec patch(binary(), Delta.t()) ::
+          {:ok, binary()} | {:error, {:copy_out_of_range, non_neg_integer(), non_neg_integer()}}
+  defdelegate patch(basis, delta), to: Delta, as: :apply_to
 
   @doc """
   The block length `rdiff` picks for a basis of `size` bytes: 256 up to

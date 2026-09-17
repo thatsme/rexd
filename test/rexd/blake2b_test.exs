@@ -28,7 +28,7 @@ defmodule Rexd.Blake2bTest do
     @describetag :tmp_dir
 
     property "matches b2sum -l 256", %{tmp_dir: dir} do
-      check all(data <- binary(max_length: 1024), max_runs: 50) do
+      check all data <- binary(max_length: 1024), max_runs: 50 do
         assert Blake2b.hash(data) == Oracle.b2sum256(data, dir)
       end
     end

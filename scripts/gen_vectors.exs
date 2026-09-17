@@ -108,4 +108,7 @@ body =
 
 File.write!("test/fixtures/vectors.term", header <> body <> "\n")
 File.rm_rf!(dir)
-IO.puts("wrote test/fixtures/vectors.term (#{length(cases)} rdiff cases, #{length(blake2b_vectors)} BLAKE2b digests)")
+
+IO.puts(
+  "wrote test/fixtures/vectors.term (#{length(cases)} rdiff cases, #{length(blake2b_vectors)} BLAKE2b digests)"
+)
