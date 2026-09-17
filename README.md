@@ -17,9 +17,9 @@ transport.
 
 ## Features
 
-- Wire-compatible with librsync 2.x and `rdiff`: RabinKarp weak checksums,
-  BLAKE2b strong hashes (`RS_RK_BLAKE2_SIG_MAGIC`), and the librsync delta
-  command format. Verified against `rdiff` and `b2sum`.
+- Wire-compatible with librsync 2.x and `rdiff`: all four signature types
+  (RabinKarp or rollsum weak checksums with BLAKE2b or MD4 strong hashes) and
+  the librsync delta command format. Verified against `rdiff` and `b2sum`.
 - Whole-binary functions and streaming variants over enumerables of binaries,
   with bounded memory.
 - Hardened for untrusted input: decoders return error tuples on any byte
@@ -104,7 +104,9 @@ be invalid while the stream is consumed.
 
 Signatures and deltas can be exchanged with `rdiff` in either direction. Pass
 the block length and strong hash length explicitly, since `rdiff` otherwise
-picks them from the input size:
+picks them from the input size. `rdiff -R rollsum -H md4` produces the older
+signature type that `Rexd.signature(basis, weak: :rollsum, strong: :md4)`
+matches:
 
 ```sh
 rdiff -b 2048 -S 32 signature basis.bin basis.sig
@@ -114,8 +116,8 @@ rdiff patch basis.bin update.delta rebuilt.bin
 
 ## Limitations
 
-- Only `RS_RK_BLAKE2_SIG_MAGIC` signatures are read and written. The older
-  MD4 and rollsum variants return `{:error, {:unsupported_magic, kind}}`.
+- MD4 signatures (`strong: :md4`) are supported for peers on older librsync
+  defaults; MD4 is not collision-resistant, so prefer the default BLAKE2b.
 - The librsync format carries no checksum of the rebuilt data. A delta
   applied to a different basis of sufficient length produces wrong output
   without an error, so callers should verify a hash of the result.

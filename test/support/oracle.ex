@@ -10,12 +10,24 @@ defmodule Rexd.Test.Oracle do
 
   def available?(tool) when tool in @tools, do: System.find_executable(to_string(tool)) != nil
 
-  def rdiff_signature(basis, block_len, strong_sum_len, dir) do
+  def rdiff_signature(basis, block_len, strong_sum_len, dir, kinds \\ {:rabinkarp, :blake2}) do
     basis_path = write(dir, "basis", basis)
     sig_path = Path.join(dir, "sig")
-    rdiff!(["-b", "#{block_len}", "-S", "#{strong_sum_len}", "signature", basis_path, sig_path])
+    {weak, strong} = kinds
+    algorithms = ["-R", rdiff_name(weak), "-H", rdiff_name(strong)]
+
+    rdiff!(
+      algorithms ++
+        ["-b", "#{block_len}", "-S", "#{strong_sum_len}", "signature", basis_path, sig_path]
+    )
+
     File.read!(sig_path)
   end
+
+  defp rdiff_name(:rabinkarp), do: "rabinkarp"
+  defp rdiff_name(:rollsum), do: "rollsum"
+  defp rdiff_name(:blake2), do: "blake2"
+  defp rdiff_name(:md4), do: "md4"
 
   def rdiff_delta(signature, new, dir) do
     sig_path = write(dir, "delta-sig", signature)

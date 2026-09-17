@@ -29,7 +29,8 @@ defmodule Rexd do
       wire formats.
     * `Rexd.Stream` - the same operations over enumerables of binaries, in
       bounded memory.
-    * `Rexd.RabinKarp`, `Rexd.Blake2b` - the weak and strong checksums.
+    * `Rexd.RabinKarp`, `Rexd.Rollsum`, `Rexd.Blake2b`, `Rexd.MD4` - the
+      rolling checksums and strong hashes.
   """
 
   import Bitwise
@@ -43,8 +44,12 @@ defmodule Rexd do
 
     * `:block_len` - bytes per block, default `2048` (librsync's default for
       an input of unknown size). See `recommended_block_len/1`.
-    * `:strong_sum_len` - bytes of BLAKE2b-256 kept per block, `1..32`,
-      default `32`.
+    * `:strong_sum_len` - bytes of the strong hash kept per block: `1..32` for
+      BLAKE2b, `1..16` for MD4; defaults to the maximum.
+    * `:weak` - rolling checksum, `:rabinkarp` (default) or `:rollsum`.
+    * `:strong` - strong hash, `:blake2` (default) or `:md4`.
+
+  See `Rexd.Signature` for the four resulting librsync signature types.
 
   Raises `ArgumentError` on invalid options.
   """

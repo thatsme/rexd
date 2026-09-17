@@ -16,6 +16,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
   over enumerables of binaries, with bounded memory, and `Rexd.StreamError`.
 - `Rexd.RabinKarp` rolling checksum and `Rexd.Blake2b` (BLAKE2b-256) in pure
   Elixir.
+- All four librsync signature types, selected with the `:weak` (`:rabinkarp`,
+  `:rollsum`) and `:strong` (`:blake2`, `:md4`) options, with `Rexd.Rollsum`,
+  `Rexd.MD4` and the `Rexd.WeakChecksum` behaviour.
 - `Rexd.recommended_block_len/1`, matching `rdiff`'s default block length.
 - `:max_size` option for patching, bounding the output of untrusted deltas.
 - `Rexd.Delta.Stats`: literal and copy bytes and command counts, plus search

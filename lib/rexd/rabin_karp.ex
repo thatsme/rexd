@@ -28,6 +28,8 @@ defmodule Rexd.RabinKarp do
 
   import Bitwise
 
+  @behaviour Rexd.WeakChecksum
+
   @mask 0xFFFFFFFF
   @seed 1
   @mult 0x08104225
@@ -49,6 +51,7 @@ defmodule Rexd.RabinKarp do
       iex> Rexd.RabinKarp.hash("")
       1
   """
+  @impl true
   @spec hash(binary()) :: t()
   def hash(data) when is_binary(data), do: update(@seed, data)
 
@@ -62,6 +65,7 @@ defmodule Rexd.RabinKarp do
   def rollin(h, in_byte), do: h * @mult + in_byte &&& @mask
 
   @doc "Precomputes the constants for a window of `n` bytes."
+  @impl true
   @spec window(non_neg_integer()) :: window()
   def window(n) when is_integer(n) and n >= 0 do
     mult_n = pow(n)
@@ -72,6 +76,7 @@ defmodule Rexd.RabinKarp do
   Slides a window of `n` bytes one byte forward: `out` leaves, `in_byte`
   enters. `mult_n` and `adj_n` come from `window(n)`.
   """
+  @impl true
   @spec rotate(t(), byte(), byte(), non_neg_integer(), non_neg_integer()) :: t()
   def rotate(h, out, in_byte, mult_n, adj_n) do
     h * @mult + in_byte - mult_n * out - adj_n &&& @mask
@@ -82,6 +87,7 @@ defmodule Rexd.RabinKarp do
   `n` bytes. `mult_n` and `adj_n` come from `window(n)`, the length after
   removal (librsync `rabinkarp_rollout`).
   """
+  @impl true
   @spec rollout(t(), byte(), non_neg_integer(), non_neg_integer()) :: t()
   def rollout(h, out, mult_n, adj_n), do: h - mult_n * out - adj_n &&& @mask
 

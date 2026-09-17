@@ -42,6 +42,26 @@ From `rabinkarp.h`: `SEED = 1`, `MULT = 0x08104225`, arithmetic mod 2^32.
   (below 2^59.01, which exceeds the small-integer limit only when `h` is
   within about 1% of 2^32) and `MULT^n·out` (below 2^40).
 
+## Older signature types
+
+librsync defines four signature magics, combining two rolling checksums with
+two strong hashes; librsync selects them by nibble (`sumset.h`):
+`magic & 0xf0 == 0x30` means rollsum, `magic & 0x0f == 0x06` means MD4. All
+four are read and written.
+
+- **Rollsum** (`rollsum.h`) keeps two 16-bit sums with every byte counted as
+  `byte + 31`, and the digest is `s2 · 2^16 + s1`. librsync declares the sums
+  as `uint_fast16_t`, which is 16 bits on some platforms and 64 bits on
+  others; the digest only keeps the low 16 bits of each, so the result is the
+  same everywhere, and Rexd computes modulo 2^16 throughout. librsync also
+  applies a MurmurHash3 finaliser (`mix32`) to rollsums, but only inside its
+  in-memory hash table; it never reaches the wire.
+- **MD4** keeps at most 16 bytes per block. OTP's `:crypto` provides MD4 only
+  when OpenSSL's legacy provider is loaded, which many OpenSSL 3 builds omit,
+  so `Rexd.MD4` implements RFC 1320 in Elixir. It runs at about the speed of
+  `Rexd.Blake2b` in its direct form, so it needs none of BLAKE2b's
+  restructuring.
+
 ## Block length
 
 `rdiff` does not use a fixed default. With `-b 0`, its default, it applies
@@ -168,6 +188,7 @@ random data, `block_len` 2048, `strong_sum_len` 32.
 | `Rexd.Blake2b` | 64-bit words | each word as two 32-bit halves | 5.1 → 63.1 MB/s |
 | `scan/4` in `lib/rexd/delta/search.ex` | classify every window, then record the result | misses handled inline | 32.6 → 35.7 MB/s on unmatched data |
 | `advance/4` in `lib/rexd/delta/search.ex` | `ctx.field` for each value | one destructuring match | 26.5 → 32.6 MB/s on unmatched data |
+| `advance/4` in `lib/rexd/delta/search.ex` | `weak_hash.rotate(...)` through the module in the context | one clause per checksum with a static call | 24.7 → 29.1 MB/s on unmatched data |
 | `Rexd.RabinKarp.rotate/5` | constants recomputed per step | `MULT^n` and `MULT^n·ADJ` passed in | avoids bignum products on every byte |
 
 The reverse trade was also made once. The delta search was first written as

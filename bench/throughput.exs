@@ -3,7 +3,9 @@
 #     mix run bench/throughput.exs [megabytes]
 #
 # Every figure is input megabytes (MiB) per second of wall-clock time on one
-# scheduler, measured with :timer.tc. Results are printed as a Markdown table.
+# scheduler, measured with :timer.tc, the best of five runs. On machines with
+# performance and efficiency cores single runs vary by more than 2x depending
+# on where the scheduler thread lands. Results are printed as a Markdown table.
 
 defmodule Bench.Throughput do
   alias Rexd.{Blake2b, RabinKarp, Signature}
@@ -20,6 +22,8 @@ defmodule Bench.Throughput do
 
     sig = basis |> Rexd.signature(block_len: @block_len) |> Signature.build_index()
     zero_sig = zeros |> Rexd.signature(block_len: @block_len) |> Signature.build_index()
+    legacy = [block_len: @block_len, weak: :rollsum, strong: :md4]
+    legacy_sig = basis |> Rexd.signature(legacy) |> Signature.build_index()
     edited_delta = Rexd.delta(sig, edited)
 
     rows = [
@@ -27,12 +31,17 @@ defmodule Bench.Throughput do
       {"BLAKE2b-256, 2 KiB blocks", size,
        fn -> for <<b::binary-2048 <- basis>>, do: Blake2b.hash(b) end},
       {"`Rexd.signature/2`", size, fn -> Rexd.signature(basis, block_len: @block_len) end},
+      {"`Rexd.signature/2`, rollsum + MD4", size, fn -> Rexd.signature(basis, legacy) end},
       {"`Rexd.Stream.signature/2`", size,
        fn -> basis |> chunks() |> Rexd.Stream.signature(block_len: @block_len) |> drain() end},
       {"`Rexd.delta/2`, unrelated data", size, fn -> Rexd.delta(sig, unrelated) end},
       {"`Rexd.delta/2`, identical data", size, fn -> Rexd.delta(sig, basis) end},
       {"`Rexd.delta/2`, 100 scattered edits", size, fn -> Rexd.delta(sig, edited) end},
       {"`Rexd.delta/2`, all-zero data", size, fn -> Rexd.delta(zero_sig, zeros) end},
+      {"`Rexd.delta/2`, rollsum + MD4, unrelated data", size,
+       fn -> Rexd.delta(legacy_sig, unrelated) end},
+      {"`Rexd.delta/2`, rollsum + MD4, 100 scattered edits", size,
+       fn -> Rexd.delta(legacy_sig, edited) end},
       {"`Rexd.Stream.delta/2`, unrelated data", size,
        fn -> sig |> Rexd.Stream.delta(chunks(unrelated)) |> drain() end},
       {"`Rexd.Stream.delta/2`, 100 scattered edits", size,
@@ -45,8 +54,15 @@ defmodule Bench.Throughput do
     IO.puts("|-----------|------:|")
 
     for {name, bytes, fun} <- rows do
-      :erlang.garbage_collect()
-      {micros, _} = :timer.tc(fun)
+      micros =
+        Enum.min(
+          for _run <- 1..5 do
+            :erlang.garbage_collect()
+            {micros, _} = :timer.tc(fun)
+            micros
+          end
+        )
+
       IO.puts("| #{name} | #{Float.round(bytes / 1_048_576 / (micros / 1.0e6), 1)} |")
     end
   end

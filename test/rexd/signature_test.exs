@@ -77,8 +77,10 @@ defmodule Rexd.SignatureTest do
       assert Signature.decode(<<0x72730147::32, 16::32, 0::32>>) ==
                {:error, {:invalid_strong_sum_len, 0}}
 
-      assert Signature.decode(<<0x72730136::32, 16::32, 8::32>>) ==
-               {:error, {:unsupported_magic, :md4}}
+      assert Signature.decode(<<0x72730136::32, 16::32, 17::32>>) ==
+               {:error, {:invalid_strong_sum_len, 17}}
+
+      assert Signature.decode(<<0x72730146::32, 16::32>>) == {:error, :truncated_header}
 
       assert Signature.decode(<<0x72730236::32>>) == {:error, {:bad_magic, 0x72730236}}
     end
@@ -89,16 +91,19 @@ defmodule Rexd.SignatureTest do
       sig =
         Rexd.signature(:binary.copy("abcd", 3) <> "wxyz", block_len: 4) |> Signature.build_index()
 
-      assert sig.index[RabinKarp.hash("abcd")] == %{Signature.strong("abcd", 32) => 0}
-      assert sig.index[RabinKarp.hash("wxyz")] == %{Signature.strong("wxyz", 32) => 3}
+      assert sig.index[RabinKarp.hash("abcd")] == %{Signature.strong(:blake2, "abcd", 32) => 0}
+      assert sig.index[RabinKarp.hash("wxyz")] == %{Signature.strong(:blake2, "wxyz", 32) => 3}
       assert map_size(sig.index) == 2
     end
   end
 
+  defp vector_opts(v),
+    do: [block_len: v.block_len, strong_sum_len: v.strong_sum_len, weak: v.weak, strong: v.strong]
+
   describe "committed rdiff vectors" do
     test "our signature equals rdiff's, byte for byte" do
       for v <- Vectors.signatures() do
-        ours = Rexd.signature(v.basis, block_len: v.block_len, strong_sum_len: v.strong_sum_len)
+        ours = Rexd.signature(v.basis, vector_opts(v))
         assert IO.iodata_to_binary(Signature.encode(ours)) == v.rdiff_signature, v.name
       end
     end
@@ -108,7 +113,7 @@ defmodule Rexd.SignatureTest do
         assert {:ok, sig} = Signature.decode(v.rdiff_signature), v.name
 
         assert sig ==
-                 Rexd.signature(v.basis, block_len: v.block_len, strong_sum_len: v.strong_sum_len)
+                 Rexd.signature(v.basis, vector_opts(v))
       end
     end
   end

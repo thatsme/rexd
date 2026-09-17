@@ -3,13 +3,25 @@ defmodule Rexd.Signature do
   A block signature of a basis binary, and its librsync wire encoding.
 
   The basis is split into `block_len`-byte blocks (the last one may be
-  shorter). Each block contributes a `{weak, strong}` pair: the RabinKarp
-  checksum of the block and the first `strong_sum_len` bytes of its
-  BLAKE2b-256 digest.
+  shorter). Each block contributes a `{weak, strong}` pair: its rolling
+  checksum and the first `strong_sum_len` bytes of its strong hash.
 
-  Wire format (`RS_RK_BLAKE2_SIG_MAGIC`), all integers big-endian:
+  librsync defines four signature types, all supported:
 
-      u32 magic = 0x72730147
+  | `weak` | `strong` | magic | librsync name | `strong_sum_len` |
+  |---|---|---|---|---|
+  | `:rabinkarp` | `:blake2` | `0x72730147` | `RS_RK_BLAKE2_SIG_MAGIC` | 1..32 |
+  | `:rabinkarp` | `:md4` | `0x72730146` | `RS_RK_MD4_SIG_MAGIC` | 1..16 |
+  | `:rollsum` | `:blake2` | `0x72730137` | `RS_BLAKE2_SIG_MAGIC` | 1..32 |
+  | `:rollsum` | `:md4` | `0x72730136` | `RS_MD4_SIG_MAGIC` | 1..16 |
+
+  RabinKarp with BLAKE2b is the default and the default of librsync 2.3 and
+  later. The rollsum and MD4 types exist for peers using older librsync
+  defaults; MD4 is not collision-resistant.
+
+  Wire format, all integers big-endian:
+
+      u32 magic
       u32 block_len
       u32 strong_sum_len
       repeated: u32 weak, strong_sum_len bytes strong
@@ -25,31 +37,45 @@ defmodule Rexd.Signature do
   checksum across many blocks costs no more to process than any other.
   """
 
-  alias Rexd.{Blake2b, RabinKarp}
+  alias Rexd.{Blake2b, MD4, RabinKarp, Rollsum}
 
-  @magic 0x72730147
-  @max_strong_sum_len 32
-  @max_u32 0xFFFFFFFF
-
-  @unsupported_magics %{
-    0x72730136 => :md4,
-    0x72730137 => :rollsum_blake2,
-    0x72730146 => :rabinkarp_md4
+  @magics %{
+    {:rabinkarp, :blake2} => 0x72730147,
+    {:rabinkarp, :md4} => 0x72730146,
+    {:rollsum, :blake2} => 0x72730137,
+    {:rollsum, :md4} => 0x72730136
   }
-
+  @kinds Map.new(@magics, fn {kinds, magic} -> {magic, kinds} end)
+  @max_strong_sum_len %{blake2: 32, md4: 16}
+  @max_u32 0xFFFFFFFF
   @default_block_len 2048
 
-  defstruct [:block_len, :strong_sum_len, blocks: [], index: nil]
+  defstruct [
+    :block_len,
+    :strong_sum_len,
+    weak: :rabinkarp,
+    strong: :blake2,
+    blocks: [],
+    index: nil
+  ]
+
+  @typedoc "Rolling checksum algorithm."
+  @type weak :: :rabinkarp | :rollsum
+
+  @typedoc "Strong hash algorithm."
+  @type strong :: :blake2 | :md4
 
   @typedoc "Weak checksum and truncated strong hash of one block."
-  @type block :: {RabinKarp.t(), binary()}
+  @type block :: {non_neg_integer(), binary()}
 
   @typedoc "Weak checksum to strong hash to the lowest block number carrying both."
-  @type index :: %{RabinKarp.t() => %{binary() => non_neg_integer()}}
+  @type index :: %{non_neg_integer() => %{binary() => non_neg_integer()}}
 
   @type t :: %__MODULE__{
           block_len: pos_integer(),
           strong_sum_len: 1..32,
+          weak: weak(),
+          strong: strong(),
           blocks: [block()],
           index: index() | nil
         }
@@ -59,13 +85,17 @@ defmodule Rexd.Signature do
           :truncated_header
           | :truncated
           | {:bad_magic, non_neg_integer()}
-          | {:unsupported_magic, atom()}
           | {:invalid_block_len, non_neg_integer()}
           | {:invalid_strong_sum_len, non_neg_integer()}
 
-  @doc "The signature magic number this library reads and writes."
-  @spec magic() :: non_neg_integer()
-  def magic, do: @magic
+  @doc """
+  The librsync magic number of the signature's type.
+
+      iex> Rexd.Signature.magic(Rexd.signature(""))
+      0x72730147
+  """
+  @spec magic(t()) :: non_neg_integer()
+  def magic(%__MODULE__{weak: weak, strong: strong}), do: Map.fetch!(@magics, {weak, strong})
 
   @doc """
   Computes the signature of `basis`. See `Rexd.signature/2` for options.
@@ -74,22 +104,43 @@ defmodule Rexd.Signature do
   """
   @spec compute(binary(), keyword()) :: t()
   def compute(basis, opts \\ []) when is_binary(basis) and is_list(opts) do
-    {block_len, strong_sum_len} = options!(opts)
-
-    %__MODULE__{
-      block_len: block_len,
-      strong_sum_len: strong_sum_len,
-      blocks: compute_blocks(block_len, strong_sum_len, basis, [])
-    }
+    sig = options!(opts)
+    %{sig | blocks: compute_blocks(sig, basis, [])}
   end
 
   @doc false
-  # Validates signature options, returning {block_len, strong_sum_len}.
-  @spec options!(keyword()) :: {pos_integer(), 1..32}
+  # Validates signature options, returning a signature with no blocks.
+  @spec options!(keyword()) :: t()
   def options!(opts) when is_list(opts) do
-    opts = Keyword.validate!(opts, block_len: @default_block_len, strong_sum_len: 32)
-    {valid_block_len!(opts[:block_len]), valid_strong_sum_len!(opts[:strong_sum_len])}
+    opts =
+      Keyword.validate!(opts, [
+        :strong_sum_len,
+        block_len: @default_block_len,
+        weak: :rabinkarp,
+        strong: :blake2
+      ])
+
+    weak = valid_weak!(opts[:weak])
+    strong = valid_strong!(opts[:strong])
+    max_strong_sum_len = Map.fetch!(@max_strong_sum_len, strong)
+
+    %__MODULE__{
+      block_len: valid_block_len!(opts[:block_len]),
+      strong_sum_len: valid_strong_sum_len!(opts[:strong_sum_len], max_strong_sum_len),
+      weak: weak,
+      strong: strong
+    }
   end
+
+  defp valid_weak!(weak) when weak in [:rabinkarp, :rollsum], do: weak
+
+  defp valid_weak!(other),
+    do: raise(ArgumentError, "weak must be :rabinkarp or :rollsum, got: #{inspect(other)}")
+
+  defp valid_strong!(strong) when strong in [:blake2, :md4], do: strong
+
+  defp valid_strong!(other),
+    do: raise(ArgumentError, "strong must be :blake2 or :md4, got: #{inspect(other)}")
 
   defp valid_block_len!(len) when is_integer(len) and len in 1..@max_u32, do: len
 
@@ -100,33 +151,50 @@ defmodule Rexd.Signature do
         "block_len must be an integer in 1..#{@max_u32}, got: #{inspect(other)}"
       )
 
-  defp valid_strong_sum_len!(len) when is_integer(len) and len in 1..@max_strong_sum_len, do: len
+  defp valid_strong_sum_len!(nil, max), do: max
+  defp valid_strong_sum_len!(len, max) when is_integer(len) and len in 1..max//1, do: len
 
-  defp valid_strong_sum_len!(other) do
-    raise ArgumentError,
-          "strong_sum_len must be an integer in 1..#{@max_strong_sum_len}, got: #{inspect(other)}"
-  end
+  defp valid_strong_sum_len!(other, max),
+    do:
+      raise(
+        ArgumentError,
+        "strong_sum_len must be an integer in 1..#{max}, got: #{inspect(other)}"
+      )
 
-  defp compute_blocks(_block_len, _strong_sum_len, <<>>, acc), do: Enum.reverse(acc)
+  defp compute_blocks(_sig, <<>>, acc), do: Enum.reverse(acc)
 
-  defp compute_blocks(block_len, strong_sum_len, basis, acc) when byte_size(basis) >= block_len do
+  defp compute_blocks(%__MODULE__{block_len: block_len} = sig, basis, acc)
+       when byte_size(basis) >= block_len do
     <<block::binary-size(block_len), rest::binary>> = basis
-    compute_blocks(block_len, strong_sum_len, rest, [block_entry(block, strong_sum_len) | acc])
+    compute_blocks(sig, rest, [block_entry(sig, block) | acc])
   end
 
   # Shorter than block_len: the final block.
-  defp compute_blocks(_block_len, strong_sum_len, last, acc),
-    do: Enum.reverse([block_entry(last, strong_sum_len) | acc])
+  defp compute_blocks(sig, last, acc), do: Enum.reverse([block_entry(sig, last) | acc])
 
-  defp block_entry(block, strong_sum_len),
-    do: {RabinKarp.hash(block), strong(block, strong_sum_len)}
+  defp block_entry(sig, block),
+    do: {weak_module(sig.weak).hash(block), strong(sig.strong, block, sig.strong_sum_len)}
 
-  @doc "The strong hash of `data` truncated to `strong_sum_len` bytes."
-  @spec strong(binary(), 1..32) :: binary()
-  def strong(data, strong_sum_len) do
-    <<s::binary-size(strong_sum_len), _::binary>> = Blake2b.hash(data)
-    s
+  @doc false
+  @spec weak_module(weak()) :: module()
+  def weak_module(:rabinkarp), do: RabinKarp
+  def weak_module(:rollsum), do: Rollsum
+
+  @doc """
+  The strong hash of `data` with algorithm `kind`, truncated to
+  `strong_sum_len` bytes.
+
+      iex> Rexd.Signature.strong(:md4, "abc", 4)
+      <<0xA4, 0x48, 0x01, 0x7A>>
+  """
+  @spec strong(strong(), binary(), pos_integer()) :: binary()
+  def strong(kind, data, strong_sum_len) do
+    <<sum::binary-size(strong_sum_len), _::binary>> = full_strong(kind, data)
+    sum
   end
+
+  defp full_strong(:blake2, data), do: Blake2b.hash(data)
+  defp full_strong(:md4, data), do: MD4.hash(data)
 
   @doc "Encodes the signature in librsync wire format."
   @spec encode(t()) :: iodata()
@@ -134,45 +202,47 @@ defmodule Rexd.Signature do
 
   @doc false
   @spec encode_header(t()) :: binary()
-  def encode_header(%__MODULE__{block_len: block_len, strong_sum_len: strong_sum_len}),
-    do: <<@magic::32, block_len::32, strong_sum_len::32>>
+  def encode_header(%__MODULE__{block_len: block_len, strong_sum_len: strong_sum_len} = sig),
+    do: <<magic(sig)::32, block_len::32, strong_sum_len::32>>
 
   @doc false
   @spec encode_blocks(t()) :: [binary()]
   def encode_blocks(%__MODULE__{blocks: blocks}),
     do: Enum.map(blocks, fn {weak, strong} -> <<weak::32, strong::binary>> end)
 
-  @doc """
-  Decodes a librsync signature.
-
-  Only `RS_RK_BLAKE2_SIG_MAGIC` signatures are accepted; the MD4 and rollsum
-  variants return `{:error, {:unsupported_magic, kind}}`.
-  """
+  @doc "Decodes a librsync signature of any of the four types."
   @spec decode(binary()) :: {:ok, t()} | {:error, decode_error()}
-  def decode(<<@magic::32, 0::32, _strong_sum_len::32, _::binary>>),
-    do: {:error, {:invalid_block_len, 0}}
+  def decode(<<magic::32, block_len::32, strong_sum_len::32, body::binary>>)
+      when is_map_key(@kinds, magic),
+      do: decode_body(Map.fetch!(@kinds, magic), block_len, strong_sum_len, body)
 
-  def decode(<<@magic::32, _block_len::32, strong_sum_len::32, _::binary>>)
-      when strong_sum_len not in 1..@max_strong_sum_len,
-      do: {:error, {:invalid_strong_sum_len, strong_sum_len}}
-
-  def decode(<<@magic::32, block_len::32, strong_sum_len::32, body::binary>>)
-      when rem(byte_size(body), 4 + strong_sum_len) == 0 do
-    blocks = for <<weak::32, strong::binary-size(strong_sum_len) <- body>>, do: {weak, strong}
-    {:ok, %__MODULE__{block_len: block_len, strong_sum_len: strong_sum_len, blocks: blocks}}
-  end
-
-  def decode(<<@magic::32, _block_len::32, _strong_sum_len::32, _::binary>>),
-    do: {:error, :truncated}
-
-  def decode(<<@magic::32, _::binary>>), do: {:error, :truncated_header}
-
-  def decode(<<magic::32, _::binary>>) when is_map_key(@unsupported_magics, magic),
-    do: {:error, {:unsupported_magic, Map.fetch!(@unsupported_magics, magic)}}
+  def decode(<<magic::32, _::binary>>) when is_map_key(@kinds, magic),
+    do: {:error, :truncated_header}
 
   def decode(<<magic::32, _::binary>>), do: {:error, {:bad_magic, magic}}
-
   def decode(bin) when is_binary(bin), do: {:error, :truncated_header}
+
+  defp decode_body(_kinds, 0, _strong_sum_len, _body), do: {:error, {:invalid_block_len, 0}}
+
+  defp decode_body({_weak, strong}, _block_len, strong_sum_len, _body)
+       when strong_sum_len < 1 or strong_sum_len > :erlang.map_get(strong, @max_strong_sum_len),
+       do: {:error, {:invalid_strong_sum_len, strong_sum_len}}
+
+  defp decode_body({weak, strong}, block_len, strong_sum_len, body)
+       when rem(byte_size(body), 4 + strong_sum_len) == 0 do
+    blocks = for <<sum::32, hash::binary-size(strong_sum_len) <- body>>, do: {sum, hash}
+
+    {:ok,
+     %__MODULE__{
+       block_len: block_len,
+       strong_sum_len: strong_sum_len,
+       weak: weak,
+       strong: strong,
+       blocks: blocks
+     }}
+  end
+
+  defp decode_body(_kinds, _block_len, _strong_sum_len, _body), do: {:error, :truncated}
 
   @doc """
   Fills `index`, unless already present.

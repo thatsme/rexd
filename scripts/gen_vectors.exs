@@ -37,21 +37,33 @@ text = GenVectors.bytes(2000, 42)
 sixty_four = GenVectors.bytes(64, 7)
 <<b0::binary-16, b1::binary-16, b2::binary-16, b3::binary-16>> = sixty_four
 
-cases = [
-  {"empty basis", "", "abc", 16, 32},
-  {"empty new", "hello world", "", 4, 32},
-  {"both empty", "", "", 8, 32},
-  {"short text", "hello world, this is rexd", "hello brave world, this is rexd!", 8, 8},
-  {"block_len larger than input", "tiny basis", "tiny basis, grown", 2048, 32},
-  {"exact multiple, blocks moved", sixty_four, b2 <> b0 <> b3 <> b1, 16, 32},
-  {"all zero", :binary.copy(<<0>>, 200), :binary.copy(<<0>>, 150) <> "x", 32, 32},
-  {"insert delete replace", text, t1 <> "INSERTED" <> t3 <> binary_part(t2, 0, 100), 256, 16},
-  {"strong_sum_len 1", text, t3 <> t1, 128, 1},
-  {"literal over 64 bytes", "abc", GenVectors.bytes(300, 9), 16, 32}
-]
+cases =
+  [
+    {"empty basis", "", "abc", 16, 32},
+    {"empty new", "hello world", "", 4, 32},
+    {"both empty", "", "", 8, 32},
+    {"short text", "hello world, this is rexd", "hello brave world, this is rexd!", 8, 8},
+    {"block_len larger than input", "tiny basis", "tiny basis, grown", 2048, 32},
+    {"exact multiple, blocks moved", sixty_four, b2 <> b0 <> b3 <> b1, 16, 32},
+    {"all zero", :binary.copy(<<0>>, 200), :binary.copy(<<0>>, 150) <> "x", 32, 32},
+    {"insert delete replace", text, t1 <> "INSERTED" <> t3 <> binary_part(t2, 0, 100), 256, 16},
+    {"strong_sum_len 1", text, t3 <> t1, 128, 1},
+    {"literal over 64 bytes", "abc", GenVectors.bytes(300, 9), 16, 32},
+    {"rabinkarp md4", text, t1 <> "INSERTED" <> t3, 256, 16, {:rabinkarp, :md4}},
+    {"rollsum blake2", text, t3 <> t1 <> t2, 128, 32, {:rollsum, :blake2}},
+    {"rollsum md4", text, "x" <> text, 64, 16, {:rollsum, :md4}},
+    {"rollsum md4 short strong sum", sixty_four, b3 <> b0, 16, 4, {:rollsum, :md4}}
+  ]
+  |> Enum.map(fn
+    {name, basis, new, block_len, strong_sum_len} ->
+      {name, basis, new, block_len, strong_sum_len, {:rabinkarp, :blake2}}
+
+    full ->
+      full
+  end)
 
 signature_vectors =
-  for {name, basis, new, block_len, strong_sum_len} <- cases do
+  for {name, basis, new, block_len, strong_sum_len, {weak, strong}} <- cases do
     basis_path = Path.join(dir, "basis")
     new_path = Path.join(dir, "new")
     sig_path = Path.join(dir, "sig")
@@ -61,6 +73,10 @@ signature_vectors =
 
     GenVectors.cmd!("rdiff", [
       "-f",
+      "-R",
+      Atom.to_string(weak),
+      "-H",
+      Atom.to_string(strong),
       "-b",
       "#{block_len}",
       "-S",
@@ -76,6 +92,8 @@ signature_vectors =
       name: name,
       block_len: block_len,
       strong_sum_len: strong_sum_len,
+      weak: weak,
+      strong: strong,
       basis: GenVectors.hex(basis),
       new: GenVectors.hex(new),
       rdiff_signature: GenVectors.hex(File.read!(sig_path)),

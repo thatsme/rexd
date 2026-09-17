@@ -34,21 +34,27 @@ defmodule Rexd.Delta.Search do
   #     classify-then-record step, which cost two extra calls per byte.
   #   * advance/4 destructures Context once instead of using ctx.field, which
   #     compiles to a separate map match per access.
+  #   * advance/4 has one clause per rolling checksum, so rotate is a static
+  #     call; calling it through the module held in Context was about 20%
+  #     slower on unmatched data.
 
-  alias Rexd.{Delta, RabinKarp, Signature}
+  alias Rexd.{Delta, RabinKarp, Rollsum, Signature}
 
   defmodule Context do
     @moduledoc false
     # buffer holds the input not yet fully processed; size is its byte size.
     # last_full is the final buffer position where a full window fits
     # (negative when none does); final? is true once the input has ended.
-    # mult and adj are the RabinKarp constants for block_len.
+    # weak_hash is the rolling checksum module (see Rexd.WeakChecksum) and
+    # mult and adj its constants for block_len; strong is the strong hash.
     @enforce_keys [
       :buffer,
       :size,
       :final?,
       :block_len,
       :strong_sum_len,
+      :weak_hash,
+      :strong,
       :index,
       :blocks,
       :block_count,
@@ -78,7 +84,8 @@ defmodule Rexd.Delta.Search do
   @spec new(Signature.t(), pos_integer() | :infinity) :: t()
   def new(%Signature{} = sig, max_literal) do
     %Signature{index: index} = sig = Signature.build_index(sig)
-    {mult, adj} = RabinKarp.window(sig.block_len)
+    weak_hash = Signature.weak_module(sig.weak)
+    {mult, adj} = weak_hash.window(sig.block_len)
 
     ctx = %Context{
       buffer: <<>>,
@@ -86,6 +93,8 @@ defmodule Rexd.Delta.Search do
       final?: false,
       block_len: sig.block_len,
       strong_sum_len: sig.strong_sum_len,
+      weak_hash: weak_hash,
+      strong: sig.strong,
       index: index,
       blocks: List.to_tuple(sig.blocks),
       block_count: length(sig.blocks),
@@ -195,12 +204,23 @@ defmodule Rexd.Delta.Search do
     end
   end
 
-  # Per-byte hot path: one destructuring match instead of five ctx.field lookups.
-  defp advance(pos, weak, %Context{last_full: last_full} = ctx, out) when pos < last_full do
+  # Per-byte hot path: one destructuring match instead of five ctx.field
+  # lookups, and one clause per checksum so the rotate call is static rather
+  # than dispatched through the module held in the context.
+  defp advance(pos, weak, %Context{last_full: last_full, weak_hash: RabinKarp} = ctx, out)
+       when pos < last_full do
     %Context{buffer: buffer, block_len: block_len, mult: mult, adj: adj} = ctx
     out_byte = :binary.at(buffer, pos)
     in_byte = :binary.at(buffer, pos + block_len)
     scan(pos + 1, RabinKarp.rotate(weak, out_byte, in_byte, mult, adj), ctx, out)
+  end
+
+  defp advance(pos, weak, %Context{last_full: last_full, weak_hash: Rollsum} = ctx, out)
+       when pos < last_full do
+    %Context{buffer: buffer, block_len: block_len, mult: count, adj: unused} = ctx
+    out_byte = :binary.at(buffer, pos)
+    in_byte = :binary.at(buffer, pos + block_len)
+    scan(pos + 1, Rollsum.rotate(weak, out_byte, in_byte, count, unused), ctx, out)
   end
 
   defp advance(pos, weak, %Context{final?: false}, out), do: {:suspended, pos, weak, out}
@@ -300,14 +320,14 @@ defmodule Rexd.Delta.Search do
 
   # -- checksums ---------------------------------------------------------------
 
-  defp weak_at(ctx, pos, len), do: RabinKarp.hash(binary_part(ctx.buffer, pos, len))
+  defp weak_at(ctx, pos, len), do: ctx.weak_hash.hash(binary_part(ctx.buffer, pos, len))
 
   defp strong_at(ctx, pos, len),
-    do: Signature.strong(binary_part(ctx.buffer, pos, len), ctx.strong_sum_len)
+    do: Signature.strong(ctx.strong, binary_part(ctx.buffer, pos, len), ctx.strong_sum_len)
 
   # Removes buffer[pos] from the front of the window buffer[pos, size).
   defp drop_first(weak, ctx, pos) do
-    {mult, adj} = RabinKarp.window(ctx.size - pos - 1)
-    RabinKarp.rollout(weak, :binary.at(ctx.buffer, pos), mult, adj)
+    {mult, adj} = ctx.weak_hash.window(ctx.size - pos - 1)
+    ctx.weak_hash.rollout(weak, :binary.at(ctx.buffer, pos), mult, adj)
   end
 end

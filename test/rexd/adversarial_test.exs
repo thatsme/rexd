@@ -60,11 +60,14 @@ defmodule Rexd.AdversarialTest do
             insert <- binary(max_length: 200),
             cut <- integer(0..2000),
             block_len <- member_of([1, 8, 64, 256]),
-            strong_sum_len <- member_of([1, 8, 32]) do
+            strong_sum_len <- member_of([1, 8, 16]),
+            weak <- member_of([:rabinkarp, :rollsum]),
+            strong <- member_of([:blake2, :md4]) do
       cut = rem(cut, byte_size(basis) + 1)
       <<a::binary-size(cut), b::binary>> = basis
       new = b <> insert <> a
-      sig = Rexd.signature(basis, block_len: block_len, strong_sum_len: strong_sum_len)
+      opts = [block_len: block_len, strong_sum_len: strong_sum_len, weak: weak, strong: strong]
+      sig = Rexd.signature(basis, opts)
 
       %{
         basis: basis,
@@ -170,14 +173,15 @@ defmodule Rexd.AdversarialTest do
 
   property "random bytes as a signature" do
     check all bytes <- binary(max_length: 512),
+              magic <- member_of([0x72730136, 0x72730137, 0x72730146, 0x72730147]),
               max_runs: 1_000 do
       assert tuple_result?(Signature.decode(bytes))
-      assert tuple_result?(Signature.decode(<<Signature.magic()::32, bytes::binary>>))
+      assert tuple_result?(Signature.decode(<<magic::32, bytes::binary>>))
     end
   end
 
   test "a decoded signature with an extreme block length" do
-    bytes = <<Signature.magic()::32, 0xFFFFFFFF::32, 32::32, 1::32, 0::256>>
+    bytes = <<0x72730147::32, 0xFFFFFFFF::32, 32::32, 1::32, 0::256>>
     assert {:ok, sig} = Signature.decode(bytes)
     delta = Rexd.delta(sig, :crypto.strong_rand_bytes(10_000))
     assert [{:literal, _}] = delta.commands

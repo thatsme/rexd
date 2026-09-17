@@ -59,12 +59,11 @@ defmodule Rexd.Stream do
   """
   @spec signature(Enumerable.t(), keyword()) :: Enumerable.t()
   def signature(enumerable, opts \\ []) do
-    {block_len, strong_sum_len} = Signature.options!(opts)
-    sig = %Signature{block_len: block_len, strong_sum_len: strong_sum_len}
+    sig = Signature.options!(opts)
 
     blocks =
       enumerable
-      |> rechunk(block_len)
+      |> rechunk(sig.block_len)
       |> Stream.transform(
         fn -> <<>> end,
         &sign_chunk(&1, &2, sig),
@@ -87,9 +86,15 @@ defmodule Rexd.Stream do
 
   defp encoded_blocks(<<>>, _sig), do: []
 
-  defp encoded_blocks(data, %Signature{block_len: block_len, strong_sum_len: strong_sum_len}) do
-    sig = Signature.compute(data, block_len: block_len, strong_sum_len: strong_sum_len)
-    [IO.iodata_to_binary(Signature.encode_blocks(sig))]
+  defp encoded_blocks(data, %Signature{} = sig) do
+    opts = [
+      block_len: sig.block_len,
+      strong_sum_len: sig.strong_sum_len,
+      weak: sig.weak,
+      strong: sig.strong
+    ]
+
+    [IO.iodata_to_binary(Signature.encode_blocks(Signature.compute(data, opts)))]
   end
 
   # -- delta ---------------------------------------------------------------------

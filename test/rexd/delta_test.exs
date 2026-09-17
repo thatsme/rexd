@@ -317,7 +317,16 @@ defmodule Rexd.DeltaTest do
 
     test "our deltas re-encode losslessly and patch" do
       for v <- Vectors.signatures() do
-        {delta, patched} = round_trip(v.basis, v.new, v.block_len, v.strong_sum_len)
+        sig =
+          Rexd.signature(v.basis,
+            block_len: v.block_len,
+            strong_sum_len: v.strong_sum_len,
+            weak: v.weak,
+            strong: v.strong
+          )
+
+        delta = Rexd.delta(sig, v.new)
+        patched = Rexd.patch(v.basis, delta)
         assert patched == {:ok, v.new}, v.name
         assert Delta.decode(encode(delta)) == {:ok, delta}, v.name
       end
