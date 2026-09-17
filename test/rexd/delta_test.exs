@@ -283,14 +283,25 @@ defmodule Rexd.DeltaTest do
       assert Delta.decode(m <> <<0x41, 10, "abc">>) == {:error, :truncated}
       assert Delta.decode(m <> <<0x4F, 0, 0>>) == {:error, :truncated}
     end
-  end
 
-  describe "patch/2" do
-    test "rejects copies past the end of the basis" do
-      assert Rexd.patch("abc", %Delta{commands: [{:copy, 1, 3}]}) ==
-               {:error, {:copy_out_of_range, 1, 3}}
+    test "rejects commands librsync treats as corrupt" do
+      m = <<0x72730236::32>>
+      assert Delta.decode(m <> <<0x41, 0, 0>>) == {:error, {:zero_length, :literal}}
+      assert Delta.decode(m <> <<0x44, 0::64, 0>>) == {:error, {:zero_length, :literal}}
+      assert Delta.decode(m <> <<0x45, 7, 0, 0>>) == {:error, {:zero_length, :copy}}
+      assert Delta.decode(m <> <<0x54, 0::64, 0::64, 0>>) == {:error, {:zero_length, :copy}}
 
-      assert Rexd.patch("abc", %Delta{commands: [{:copy, 3, 0}]}) == {:ok, ""}
+      assert Delta.decode(m <> <<0x44, 1 <<< 63::64>>) ==
+               {:error, {:argument_too_large, 1 <<< 63}}
+
+      assert Delta.decode(m <> <<0x51, 1 <<< 63::64, 1, 0>>) ==
+               {:error, {:argument_too_large, 1 <<< 63}}
+
+      assert Delta.decode(m <> <<0x48, 1, 1 <<< 63::64, 0>>) ==
+               {:error, {:argument_too_large, 1 <<< 63}}
+
+      assert Delta.decode(m <> <<0x54, (1 <<< 63) - 1::64, 1::64, 0>>) ==
+               {:ok, %Delta{commands: [{:copy, (1 <<< 63) - 1, 1}]}}
     end
   end
 

@@ -26,11 +26,22 @@ defmodule Rexd.Test.Oracle do
   end
 
   def rdiff_patch(basis, delta, dir) do
+    {:ok, patched} = rdiff_patch_result(basis, delta, dir)
+    patched
+  end
+
+  # {:ok, patched} or {:error, rdiff_output} when rdiff refuses the delta.
+  def rdiff_patch_result(basis, delta, dir) do
     basis_path = write(dir, "patch-basis", basis)
     delta_path = write(dir, "patch-delta", delta)
     out_path = Path.join(dir, "patched")
-    rdiff!(["patch", basis_path, delta_path, out_path])
-    File.read!(out_path)
+
+    case System.cmd("rdiff", ["-f", "patch", basis_path, delta_path, out_path],
+           stderr_to_stdout: true
+         ) do
+      {_, 0} -> {:ok, File.read!(out_path)}
+      {out, _code} -> {:error, out}
+    end
   end
 
   def b2sum256(data, dir) do

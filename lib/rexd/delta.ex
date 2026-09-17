@@ -15,6 +15,12 @@ defmodule Rexd.Delta do
   generated from librsync's `prototab.c`. Encoding follows librsync's
   `emit.c`: literals of 1..64 bytes carry their length in the opcode, longer
   literals and both copy arguments use the smallest width that fits.
+
+  `decode/1` rejects what librsync's patcher treats as a corrupt stream:
+  zero-length literal or copy commands, and arguments of 2^63 or more
+  (librsync reads them as signed 64-bit integers). Whether copies fit the
+  basis is checked by `Rexd.patch/3`, the first point where the basis is
+  known.
   """
 
   alias Rexd.Delta.{Prototab, Search}
@@ -35,6 +41,8 @@ defmodule Rexd.Delta do
           | :trailing_data
           | {:bad_magic, non_neg_integer()}
           | {:reserved_opcode, byte()}
+          | {:zero_length, :literal | :copy}
+          | {:argument_too_large, non_neg_integer()}
 
   @typedoc """
   Search counters: `weak_hits` windows whose weak checksum was in the index
@@ -71,6 +79,7 @@ defmodule Rexd.Delta do
   @literal_by_width for {op, :literal, 0, w, 0} <- @table, into: %{}, do: {w, op}
   @copy_by_widths for {op, :copy, 0, w1, w2} <- @table, into: %{}, do: {{w1, w2}, op}
   @max_immediate @literal_immediate |> Map.keys() |> Enum.max()
+  @max_argument 0x7FFFFFFFFFFFFFFF
 
   @doc "Encodes the delta in librsync wire format. Zero-length commands are omitted."
   @spec encode(t()) :: iodata()
@@ -122,7 +131,17 @@ defmodule Rexd.Delta do
       do: decode_commands(rest, [{:literal, data} | acc])
   end
 
+  # librsync reads arguments as signed 64-bit integers and rejects zero lengths
+  # (patch.c), so such commands are corrupt on the wire.
+
   for {op, :literal, 0, w, 0} <- @table do
+    defp decode_commands(<<unquote(op), 0::size(unquote(w * 8)), _::binary>>, _acc),
+      do: {:error, {:zero_length, :literal}}
+
+    defp decode_commands(<<unquote(op), len::size(unquote(w * 8)), _::binary>>, _acc)
+         when len > @max_argument,
+         do: {:error, {:argument_too_large, len}}
+
     defp decode_commands(<<unquote(op), len::size(unquote(w * 8)), rest::binary>>, acc)
          when byte_size(rest) >= len do
       <<data::binary-size(len), rest::binary>> = rest
@@ -131,6 +150,19 @@ defmodule Rexd.Delta do
   end
 
   for {op, :copy, 0, w1, w2} <- @table do
+    defp decode_commands(
+           <<unquote(op), _offset::size(unquote(w1 * 8)), 0::size(unquote(w2 * 8)), _::binary>>,
+           _acc
+         ),
+         do: {:error, {:zero_length, :copy}}
+
+    defp decode_commands(
+           <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)), _::binary>>,
+           _acc
+         )
+         when offset > @max_argument or len > @max_argument,
+         do: {:error, {:argument_too_large, max(offset, len)}}
+
     defp decode_commands(
            <<unquote(op), offset::size(unquote(w1 * 8)), len::size(unquote(w2 * 8)),
              rest::binary>>,
@@ -146,28 +178,4 @@ defmodule Rexd.Delta do
 
   defp decode_commands(<<>>, _acc), do: {:error, :missing_end}
   defp decode_commands(_truncated_command, _acc), do: {:error, :truncated}
-
-  # ---------------------------------------------------------------------------
-  # Patch
-  # ---------------------------------------------------------------------------
-
-  @doc "Applies the delta to `basis`. See `Rexd.patch/2`."
-  @spec apply_to(binary(), t()) ::
-          {:ok, binary()} | {:error, {:copy_out_of_range, non_neg_integer(), non_neg_integer()}}
-  def apply_to(basis, %__MODULE__{commands: commands}) when is_binary(basis) do
-    apply_commands(commands, basis, byte_size(basis), [])
-  end
-
-  defp apply_commands([], _basis, _size, acc),
-    do: {:ok, acc |> :lists.reverse() |> IO.iodata_to_binary()}
-
-  defp apply_commands([{:literal, data} | rest], basis, size, acc),
-    do: apply_commands(rest, basis, size, [data | acc])
-
-  defp apply_commands([{:copy, offset, len} | rest], basis, size, acc)
-       when offset + len <= size,
-       do: apply_commands(rest, basis, size, [binary_part(basis, offset, len) | acc])
-
-  defp apply_commands([{:copy, offset, len} | _], _basis, _size, _acc),
-    do: {:error, {:copy_out_of_range, offset, len}}
 end

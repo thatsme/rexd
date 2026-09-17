@@ -19,7 +19,7 @@ defmodule Rexd do
 
   import Bitwise
 
-  alias Rexd.{Delta, Signature}
+  alias Rexd.{Delta, Patch, Signature}
 
   @doc """
   Computes the signature of `basis`.
@@ -48,13 +48,35 @@ defmodule Rexd do
   @doc """
   Rebuilds the new binary by applying `delta` to `basis`.
 
-  Returns `{:error, {:copy_out_of_range, offset, length}}` when a copy
-  command reaches past the end of `basis`, which happens when the delta was
-  computed against a different basis.
+      iex> basis = "the quick brown fox jumps over the lazy dog"
+      iex> new = "the quick red fox jumps over the lazy dog"
+      iex> sig = Rexd.signature(basis, block_len: 8)
+      iex> Rexd.patch(basis, Rexd.delta(sig, new))
+      {:ok, "the quick red fox jumps over the lazy dog"}
+
+  ## Options
+
+    * `:max_size` - the largest output, in bytes, the call may produce;
+      default `:infinity`. Checked before any output is built. Set it when
+      the delta comes from an untrusted source.
+
+  ## Errors
+
+    * `{:copy_out_of_range, offset, length}` - a copy command reaches past
+      the end of `basis`, typically because the delta was computed against a
+      different basis. A delta computed against a different basis of
+      sufficient length patches without error and produces wrong output;
+      detecting that requires a checksum of the expected result, which the
+      librsync format does not carry.
+    * `{:output_too_large, size, max_size}` - the output would exceed
+      `:max_size`.
+
+  Raises `ArgumentError` on invalid options and `FunctionClauseError` on a
+  malformed `Rexd.Delta` struct (a delta returned by `delta/2` or
+  `Rexd.Delta.decode/1` is always well-formed).
   """
-  @spec patch(binary(), Delta.t()) ::
-          {:ok, binary()} | {:error, {:copy_out_of_range, non_neg_integer(), non_neg_integer()}}
-  defdelegate patch(basis, delta), to: Delta, as: :apply_to
+  @spec patch(binary(), Delta.t(), keyword()) :: {:ok, binary()} | {:error, Patch.error()}
+  defdelegate patch(basis, delta, opts \\ []), to: Patch, as: :apply_delta
 
   @doc """
   The block length `rdiff` picks for a basis of `size` bytes: 256 up to

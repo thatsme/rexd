@@ -67,7 +67,15 @@ librsync bounds the size of a literal command and so never emits
 `LITERAL_N8`. Rexd emits a single literal per unmatched run, which uses
 `LITERAL_N8` only above 4 GiB. Both decoders accept it.
 
-`Rexd.Delta.decode/1` rejects bytes after the END command.
+`Rexd.Delta.decode/1` rejects bytes after the END command, and rejects what
+librsync's patcher (`patch.c`) reports as a corrupt stream: zero-length
+literal or copy commands, and 8-byte arguments of 2^63 or more, which
+librsync reads as negative signed integers.
+
+`Rexd.patch/3` checks every copy against the basis length and computes the
+output size before building any output. A delta of a few kilobytes can
+describe gigabytes of output through repeated copies, so `:max_size` bounds
+it for deltas from untrusted sources.
 
 ## Delta search
 
@@ -94,9 +102,9 @@ Differences, none of which affect the wire format:
 
 ## Code shaped by performance
 
-Where a faster form of the code is harder to read than the obvious one, the
-obvious form was measured first and the faster form is kept only for a
-material gain. Each case below also carries a comment at the code site.
+A few places favour speed over the most direct form of the code. Each is
+listed here with the direct form it replaces and the measured difference, and
+carries a short comment at the code site.
 
 Measurements: Apple Silicon laptop, Elixir 1.19 / OTP 28 with the JIT,
 random data, `block_len` 2048, `strong_sum_len` 32.
