@@ -19,25 +19,34 @@ Measurements of throughput and memory. All figures come from the scripts in
 mix run bench/throughput.exs 20
 ```
 
-Input MiB per second over 20 MiB:
+Input MiB per second over 20 MiB. The machine mixes performance and
+efficiency cores, and single runs vary by more than 2x with the kind of core
+the scheduler thread lands on, for seconds at a time. The script therefore
+measures the whole table in four interleaved rounds and reports each row's
+best run.
 
 | Operation | MiB/s |
 |-----------|------:|
-| RabinKarp rolling update | 96.0 |
-| BLAKE2b-256, 2 KiB blocks | 63.6 |
-| `Rexd.signature/2` | 54.6 |
-| `Rexd.Stream.signature/2` | 55.4 |
-| `Rexd.delta/2`, unrelated data | 32.4 |
-| `Rexd.delta/2`, identical data | 54.1 |
-| `Rexd.delta/2`, 100 scattered edits | 54.1 |
-| `Rexd.delta/2`, all-zero data | 56.2 |
-| `Rexd.Stream.delta/2`, unrelated data | 31.9 |
-| `Rexd.Stream.delta/2`, 100 scattered edits | 53.8 |
+| RabinKarp rolling update | 100.1 |
+| BLAKE2b-256, 2 KiB blocks | 61.0 |
+| `Rexd.signature/2` | 56.9 |
+| `Rexd.signature/2`, rollsum + MD4 | 132.3 |
+| `Rexd.Stream.signature/2` | 56.3 |
+| `Rexd.delta/2`, unrelated data | 30.0 |
+| `Rexd.delta/2`, identical data | 55.9 |
+| `Rexd.delta/2`, 100 scattered edits | 53.1 |
+| `Rexd.delta/2`, all-zero data | 53.6 |
+| `Rexd.delta/2`, rollsum + MD4, unrelated data | 30.0 |
+| `Rexd.delta/2`, rollsum + MD4, 100 scattered edits | 149.3 |
+| `Rexd.Stream.delta/2`, unrelated data | 28.8 |
+| `Rexd.Stream.delta/2`, 100 scattered edits | 55.2 |
 
-- **Signature** speed is set by BLAKE2b, which runs once over every basis
-  block.
+- **Signature** speed is set by the strong hash, which runs once over every
+  basis block. MD4 is more than twice as fast as BLAKE2b-256 here, which is
+  why the older signature types sign and match faster; BLAKE2b remains the
+  default because MD4 is not collision-resistant.
 - **Delta** has two regimes. Where data matches the basis, the window jumps
-  a block at a time and pays one BLAKE2b per block, so it runs close to
+  a block at a time and pays one strong hash per block, so it runs close to
   signature speed. Where nothing matches, the window rolls one byte at a time
   and pays a map lookup per byte; that is the slowest ordinary case, about
   32 MiB/s. Mixed data falls between the two.
@@ -68,13 +77,13 @@ binary memory shows whether data is copied.
 
 | Scenario (100 MiB) | Operation | Process heap peak | Binary peak |
 |----------|-----------|------------------:|------------:|
-| whole-binary | `Rexd.signature/2` | 35.8 MiB | 167 KiB |
-| whole-binary | `Rexd.delta/2`, edited | 29.7 MiB | 55 KiB |
+| whole-binary | `Rexd.signature/2` | 34.2 MiB | 172 KiB |
+| whole-binary | `Rexd.delta/2`, edited | 29.6 MiB | 63 KiB |
 | whole-binary | `Rexd.delta/2`, unrelated | 31.5 MiB | 0 KiB |
-| whole-binary | `Rexd.patch/3` (output 100 MiB) | 582 KiB | 100.0 MiB |
-| streaming | `Rexd.Stream.signature/2` | 514 KiB | 603 KiB |
-| streaming | `Rexd.Stream.delta/2` | 20.3 MiB | 326 KiB |
-| streaming | `Rexd.Stream.patch/3` | 465 KiB | 639 KiB |
+| whole-binary | `Rexd.patch/3` (output 100 MiB) | 581 KiB | 100.0 MiB |
+| streaming | `Rexd.Stream.signature/2` | 504 KiB | 925 KiB |
+| streaming | `Rexd.Stream.delta/2` | 20.4 MiB | 326 KiB |
+| streaming | `Rexd.Stream.patch/3` | 607 KiB | 651 KiB |
 
 The streamed delta is 201 KiB, and the patched file is verified against the
 new file by SHA-256.
